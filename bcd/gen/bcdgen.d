@@ -317,9 +317,13 @@ char[] safeName(char[] name)
  */
 char[] getNName(xmlNode *node)
 {
-    char[] name = safeName(toStringFree(xmlGetProp(node, "name")));
-    if (name == "") name = safeName(toStringFree(xmlGetProp(node, "mangled")));
-    if (name == "") name = safeName("_BCD_" ~ toStringFree(xmlGetProp(node, "id")));
+    char[] name = toStringFree(xmlGetProp(node, "name"));
+    if (name == "") name = toStringFree(xmlGetProp(node, "mangled"));
+    if (name == "") {
+        char[] id = toStringFree(xmlGetProp(node, "id"));
+        if (id != "")
+            name = "_BCD_" ~ id;
+    }
     return name;
 }
 
@@ -363,6 +367,7 @@ bool parseThis(xmlNode *node, bool allowNameless = false)
     char* file = xmlGetProp(node, "file");
     char* demangled = getDemangled(node);
     char* incomplete = xmlGetProp(node, "incomplete");
+    if (incomplete) free(incomplete);
     
     if (file && (demangled || allowNameless) && !incomplete) {
         char[] sfile = toStringFree(file);
@@ -406,7 +411,6 @@ bool parseThis(xmlNode *node, bool allowNameless = false)
     } else {
         if (file) free(file);
         if (demangled) free(demangled);
-        if (incomplete) free(incomplete);
         return false;
     }
 }
@@ -615,7 +619,7 @@ void parse_Class(xmlNode *node)
     // if this is derived from a template, the derivation is worthless from D
     if (find(base, '<') != -1) base = "bcd.bind.BoundClass";
     
-    dtail ~= "class " ~ name ~ " : " ~ base ~ " {\n";
+    dtail ~= "class " ~ safeName(name) ~ " : " ~ base ~ " {\n";
     
     dtail ~= "this(ifloat ignore) {\n";
     dtail ~= "super(ignore);\n";
@@ -655,7 +659,7 @@ void parse_Struct(xmlNode *node)
     } else {
         dtail ~= "struct ";
     }
-    dtail ~= name ~ " {\n";
+    dtail ~= safeName(name) ~ " {\n";
     
     curClass = demangled;
     
@@ -684,7 +688,7 @@ void parse_Variable(xmlNode *node, bool inclass)
             if (stype[stype.length - 1] != 'c') {
                 dhead ~= "extern (C) void _BCD_set_" ~ mangled ~ "(void *, " ~ type.DType ~ ");\n";
             
-                dtail ~= "void set_" ~ name ~ "(" ~ type.DType ~ " x) {\n";
+                dtail ~= "void set_" ~ safeName(name) ~ "(" ~ type.DType ~ " x) {\n";
                 dtail ~= "_BCD_set_" ~ mangled ~ "(__C_data, x);\n";
                 dtail ~= "}\n";
             
@@ -699,7 +703,7 @@ void parse_Variable(xmlNode *node, bool inclass)
         
             dhead ~= "extern (C) " ~ type.DType ~ " _BCD_get_" ~ mangled ~ "(void *);\n";
         
-            dtail ~= type.DType ~ " get_" ~ name ~ "() {\n";
+            dtail ~= type.DType ~ " get_" ~ safeName(name) ~ "() {\n";
             dtail ~= "return _BCD_get_" ~ mangled ~ "(__C_data);\n";
             dtail ~= "}\n";
         
@@ -715,7 +719,7 @@ void parse_Variable(xmlNode *node, bool inclass)
             if (stype[stype.length - 1] != 'c') {
                 dhead ~= "extern (C) void _BCD_set_" ~ mangled ~ "(" ~ type.DType ~ ");\n";
             
-                dtail ~= "void set_" ~ name ~ "(" ~ type.DType ~ " x) {\n";
+                dtail ~= "void set_" ~ safeName(name) ~ "(" ~ type.DType ~ " x) {\n";
                 dtail ~= "_BCD_set_" ~ mangled ~ "(x);\n";
                 dtail ~= "}\n";
             
@@ -730,7 +734,7 @@ void parse_Variable(xmlNode *node, bool inclass)
         
             dhead ~= "extern (C) " ~ type.DType ~ " _BCD_get_" ~ mangled ~ "();\n";
         
-            dtail ~= type.DType ~ " get_" ~ name ~ "() {\n";
+            dtail ~= type.DType ~ " get_" ~ safeName(name) ~ "() {\n";
             dtail ~= "return _BCD_get_" ~ mangled ~ "();\n";
             dtail ~= "}\n";
         
@@ -1140,8 +1144,6 @@ void parse_Typedef(xmlNode *node)
 {
     static bool[char[]] handledTypedefs;
     
-    if (!parseThis(node)) return;
-    
     char[] type = toStringFree(xmlGetProp(node, "id"));
     char[] deftype = toStringFree(xmlGetProp(node, "type"));
     
@@ -1153,7 +1155,7 @@ void parse_Typedef(xmlNode *node)
         
         cout ~= "typedef " ~ pt.CType ~ " _BCD_" ~ aname ~ ";\n";
         
-        dhead ~= "alias " ~ pt.DType ~ " " ~ aname ~ ";\n";
+        if (parseThis(node, true)) dhead ~= "alias " ~ pt.DType ~ " " ~ safeName(aname) ~ ";\n";
     }
 }
 
@@ -1185,7 +1187,7 @@ void parse_Enumeration(xmlNode *node)
         
         if (aname[0] == '.') return;
         
-        dhead ~= "enum " ~ aname ~ " {\n";
+        dhead ~= "enum " ~ safeName(aname) ~ " {\n";
         
         xmlNode *curNode = null;
         
@@ -1241,6 +1243,7 @@ class ParsedType {
     ParsedType dup()
     {
         ParsedType pt = new ParsedType(this);
+        pt.className ~= className;
         pt.isClass = isClass;
         pt.isClassPtr = isClassPtr;
         pt.isFunction = isFunction;
@@ -1255,6 +1258,8 @@ class ParsedType {
     bool isFunction;
 }
 
+extern (C) int getpid();
+extern (C) int kill(int, int);
 /**
  * Get the type of a node in C[++] and D
  */
@@ -1263,6 +1268,8 @@ ParsedType parseType(char[] type)
     static ParsedType[char[]] parsedCache;
     
     int xmlrret;
+    
+    if (type == "") kill(getpid(), 11);
     
     // first find the element matching the type
     if (!(type in parsedCache)) {
@@ -1412,14 +1419,14 @@ ParsedType parseType(char[] type)
                     
                         // 1) cut off the *
                         baseType.CType = baseType.CType[0 .. baseType.CType.length - 2];
-                    
+                        
                         // 2) add the &
                         if (outputC) {
                             baseType.CType ~= " *";
                         } else {
                             baseType.CType ~= " &";
                         }
-                    
+                        
                         ParsedType pt = new ParsedType(baseType);
                         pt.isClassPtr = true;
                         parsedCache[type] = pt;
@@ -1495,9 +1502,9 @@ ParsedType parseType(char[] type)
                     // this is also an alias, but we should replicate it in D
                     ParsedType pt = parseType(toStringFree(xmlGetProp(curNode, "type")));
                     char[] aname = getNName(curNode);
-                
-                    if (parseThis(curNode)) parse_Typedef(curNode);
-                
+                    
+                    parse_Typedef(curNode);
+                    
                     ParsedType rpt = new ParsedType("_BCD_" ~ aname, pt.DType);
                     rpt.isClass = pt.isClass;
                     rpt.isFunction = pt.isFunction;
@@ -1509,10 +1516,10 @@ ParsedType parseType(char[] type)
                 
                     if (!(type in handledFunctions)) {
                         handledFunctions[type] = true;
-                    
+                        
                         ParsedType pt = parseType(toStringFree(xmlGetProp(curNode, "returns")));
                         char[] couta, dheada;
-                    
+                        
                         bool first = true;
                         couta = "typedef " ~ pt.CType ~
                         " (*_BCD_func_" ~ type ~ ")(";
@@ -1523,19 +1530,31 @@ ParsedType parseType(char[] type)
                         for (curArg = curNode.children; curArg; curArg = curArg.next) {
                             if (curArg.type == xmlElementType.XML_ELEMENT_NODE) {
                                 char[] aname = toString(curArg.name);
-                            
-                                ParsedType argType =
-                                    parseType(toStringFree(xmlGetProp(curArg, "type")));
-                            
-                                if (!first) {
-                                    couta ~= ", ";
-                                    dheada ~= ", ";
-                                } else {
-                                    first = false;
+                                
+                                if (aname == "Argument") {
+                                    ParsedType argType =
+                                        parseType(toStringFree(xmlGetProp(curArg, "type")));
+                                    
+                                    if (!first) {
+                                        couta ~= ", ";
+                                        dheada ~= ", ";
+                                    } else {
+                                        first = false;
+                                    }
+                                    
+                                    couta ~= argType.CType;
+                                    dheada ~= argType.DType;
+                                } else if (aname == "Ellipsis" && outputC) {
+                                    if (!first) {
+                                        couta ~= ", ";
+                                        dheada ~= ", ";
+                                    } else {
+                                        first = false;
+                                    }
+                                    
+                                    couta ~= "...";
+                                    dheada ~= "...";
                                 }
-                            
-                                couta ~= argType.CType;
-                                dheada ~= argType.DType;
                             }
                         }
                     
@@ -1565,6 +1584,9 @@ ParsedType parseType(char[] type)
                         char[] context = toStringFree(xmlGetProp(curNode, "context"));
                         if (context != "") {
                             ParsedType pt = parseType(context);
+                            
+                            pt.CType = replace(pt.CType, " *", "");
+                            
                             if (pt.CType == "") {
                                 pt.CType = "enum " ~ aname;
                             } else {
