@@ -39,6 +39,7 @@ private import bcd.gen.libxml2;
 extern (C) char* getenv(char*);
 
 // some global variables (yay)
+private {
 /** The full path to the current file */
 char[] curFile;
 /** The include prefix */
@@ -51,24 +52,49 @@ char[] shortName;
 char[] dNamespace;
 /** The C++ functions/variables to explicitly ignore */
 char[][] ignoreSyms;
+}
 /** The D output */
 char[] dhead;
 char[] dtail;
 /** The C[++] output */
 char[] cout;
+private {
+/** The class currently being processed */
 char[] curClass;
+/** Was a constructor made for the current class? */
+bool hasConstructor;
+/** Was an accessable constructor made for the current class? */
+bool hasPublicConstructor;
 /** Should we output C instead of C++ */
 bool outputC;
 /** Should we output symbols provided by any header in the dir? */
 bool outputAll;
 /** Should we generate consts for enums? */
 bool outputEnumConst;
+/** Should we output reflections? */
+bool outputReflections;
 /** Other BCD requirements */
 char[][char[]] reqDependencies;
 /** The root to the XML tree */
 xmlNode *gccxml = null;
 
+/** Class currently being reflected into D */
+char[] curReflection;
+/** The base of the class currently being reflected (in C++) */
+char[] curReflectionCBase;
+/** The base of the class currently being reflected (in D) */
+char[] curReflectionDBase;
+/** The initializer for the current reflection */
+char[] curReflectionInit;
+/** The C++ code for the class currently being reflected */
+char[] reflectionCode;
+/** The C++ code to go after we close the class */
+char[] reflectionPostCode;
+/** The functions that have already been reflected */
+bool[char[]] reflectedFunctions;
+
 char[][char[]] files;
+}
 
 
 int main(char[][] args)
@@ -87,6 +113,9 @@ int main(char[][] args)
         writefln("  -F<forced import>");
         writefln("  -R<include directory>=<BCD/D namespace>");
         writefln("    Depend upon other BCD namespaces.");
+        writefln("  -r");
+        writefln("    Reflect C++ classes such that D classes can derive from");
+        writefln("    them.");
         writefln("  -E");
         writefln("    Generate const int's for unnamed enum values");
         writefln("  -T<template class>[=<count>]");
@@ -155,6 +184,9 @@ int main(char[][] args)
         } else if (args[i] == "-E") {
             outputEnumConst = true;
             
+        } else if (args[i] == "-r") {
+            outputReflections = true;
+
         } else {
             writefln("Argument %s not recognized.", args[i]);
         }
@@ -418,7 +450,7 @@ bool parseThis(xmlNode *node, bool allowNameless = false)
 /**
  * Parse the members of a node
  */
-void parseMembers(xmlNode *node, bool inclass, bool types)
+void parseMembers(xmlNode *node, bool inclass, bool types, bool reflection = false)
 {
     char *members = xmlGetProp(node, "members");
     if (!members) return;
@@ -428,7 +460,7 @@ void parseMembers(xmlNode *node, bool inclass, bool types)
     
     // parse each member in the memberList
     foreach (m; memberList) {
-        parse_GCC_XML_for(m, inclass, types);
+        parse_GCC_XML_for(m, inclass, types, reflection);
     }
 }
 
@@ -480,7 +512,7 @@ void parse_GCC_XML()
 /**
  * Parse a GCC_XML node for a specified ID
  */
-void parse_GCC_XML_for(char[] parseFor, bool inclass, bool types)
+void parse_GCC_XML_for(char[] parseFor, bool inclass, bool types, bool reflection = false)
 {
     xmlNode *curNode = null;
     int xmlrret;
@@ -491,6 +523,11 @@ void parse_GCC_XML_for(char[] parseFor, bool inclass, bool types)
             
             char *id = xmlGetProp(curNode, "id");
             if (parseFor != toStringFree(id)) continue;
+
+            if (nname == "Constructor") {
+                // this may be private or otherwise unparsable, but we do have one
+                hasConstructor = true;
+            }
             
             // types that can be nameless:
             if (!parseThis(curNode, true)) continue;
@@ -514,21 +551,21 @@ void parse_GCC_XML_for(char[] parseFor, bool inclass, bool types)
             //writefln("  %s", nname);
             
             if (nname == "Variable" || nname == "Field") {
-                if (!types) parse_Variable(curNode, inclass);
+                if (!types && !reflection) parse_Variable(curNode, inclass);
             } else if (nname == "Method") {
-                if (!types) parse_Method(curNode);
+                if (!types) parse_Method(curNode, reflection);
             } else if (nname == "OperatorMethod") {
-                if (!types) parse_OperatorMethod(curNode);
+                if (!types) parse_OperatorMethod(curNode, reflection);
             } else if (nname == "Function") {
-                if (!types) parse_Function(curNode);
+                if (!types && !reflection) parse_Function(curNode);
             } else if (nname == "Constructor") {
-                if (!types) parse_Constructor(curNode);
+                if (!types) parse_Constructor(curNode, reflection);
             } else if (nname == "Destructor") {
                 // this code is automatic :)
             } else if (nname == "Typedef") {
-                if (types) parse_Typedef(curNode);
+                if (types && !reflection) parse_Typedef(curNode);
             } else if (nname == "Enumeration") {
-                if (types) parse_Enumeration(curNode);
+                if (types && !reflection) parse_Enumeration(curNode);
             } else {
                 writefln("I don't know how to parse %s!", nname);
             }
@@ -600,6 +637,11 @@ void parse_Class(xmlNode *node)
     char[] name = getNName(node);
     char[] mangled = toStringFree(getMangled(node));
     char[] demangled = toStringFree(getDemangled(node));
+    char* isabstract = xmlGetProp(node, "abstract");
+    if (isabstract) free(isabstract);
+    curClass = demangled;
+    hasConstructor = false;
+    hasPublicConstructor = false;
     
     parseMembers(node, true, true);
     
@@ -625,6 +667,11 @@ void parse_Class(xmlNode *node)
     dtail ~= "super(ignore);\n";
     dtail ~= "}\n";
     
+    dtail ~= "this(ifloat ignore, void *x) {\n";
+    dtail ~= "super(ignore);\n";
+    dtail ~= "__C_data = x;\n";
+    dtail ~= "}\n";
+    
     cout ~= "void _BCD_delete_" ~ mangled ~ "(" ~ demangled ~ " *This) {\n";
     cout ~= "delete This;\n";
     cout ~= "}\n";
@@ -636,10 +683,114 @@ void parse_Class(xmlNode *node)
     dtail ~= "__C_data = null;\n";
     dtail ~= "}\n";
     
-    curClass = demangled;
-    
     parseMembers(node, true, false);
+    
+    // if the constructor is implicit, replicate it here
+    if (!hasConstructor && !isabstract) {
+        dhead ~= "extern (C) void *_BCD_new_" ~ mangled ~ "();\n";
+        dtail ~= "this() {\n";
+        dtail ~= "super(cast(ifloat) 0);\n";
+        dtail ~= "__C_data = _BCD_new_" ~ mangled ~ "();\n";
+        dtail ~= "}\n";
+        cout ~= demangled ~ " *_BCD_new_" ~ mangled ~ "() {\n";
+        cout ~= "return new " ~ demangled ~ "();\n";
+        cout ~= "}\n";
+    }
+    
     dtail ~= "}\n";
+    
+    // now make the reflected class
+    if (!outputReflections) return;
+    if (isabstract) return; // not for abstract classes yet
+    curReflectionCBase = demangled;
+    curReflectionDBase = safeName(name);
+    curReflection = curReflectionDBase ~ "_R";
+    curReflectionInit = "_BCD_RI_" ~ mangled;
+    
+    dhead ~= "extern (C) void " ~ curReflectionInit ~ "(void *cd, void *dd);\n";
+    
+    dtail ~= "class " ~ curReflection ~ " : " ~ curReflectionDBase ~ " {\n";
+    
+    dhead ~= "extern (C) void _BCD_delete_" ~ mangled ~ "__" ~ curReflection ~ "(void *This);\n";
+
+    dtail ~= "~this() {\n";
+    dtail ~= "if (__C_data) _BCD_delete_" ~ mangled ~ "__" ~ curReflection ~ "(__C_data);\n";
+    dtail ~= "__C_data = null;\n";
+    dtail ~= "}\n";
+    
+    reflectionPostCode = "";
+    
+    reflectionCode = "}\n"; // close the extern "C"
+    reflectionCode ~= "class " ~ curReflection ~ " : " ~ curReflectionCBase ~ " {\n";
+    reflectionCode ~= "public:\n";
+    reflectionCode ~= "void *__D_data;\n";
+
+    hasConstructor = false;
+    hasPublicConstructor = false;
+    parseBaseReflections(node);
+    
+    reflectionCode ~= "};\n";
+    reflectionCode ~= "extern \"C\" {\n";
+    
+    cout ~= reflectionCode ~ reflectionPostCode;
+    
+    reflectionCode = "";
+    reflectedFunctions = null;
+    
+    cout ~= "void _BCD_delete_" ~ mangled ~ "__" ~ curReflection ~ "(" ~ curReflection ~ " *This) {\n";
+    cout ~= "delete This;\n";
+    cout ~= "}\n";
+    
+    // if the constructor is implicit, make it here
+    if (!hasConstructor) {
+        dhead ~= "extern (C) void *_BCD_new_" ~ mangled ~ "__" ~ curReflection ~ "();\n";
+        dtail ~= "this() {\n";
+        dtail ~= "super(cast(ifloat) 0);\n";
+        dtail ~= "__C_data = _BCD_new_" ~ mangled ~ "__" ~ curReflection ~ "();\n";
+        dtail ~= "}\n";
+        cout ~= curReflection ~ " *_BCD_new_" ~ mangled ~ "__" ~ curReflection ~ "() {\n";
+        cout ~= "return new " ~ curReflection ~ "();\n";
+        cout ~= "}\n";
+    } else if (!hasPublicConstructor) {
+        dtail ~= "this() { super(cast(ireal) 0); }\n";
+    }
+    
+    dtail ~= "}\n";
+    
+    // then make the initializer
+    cout ~= "void _BCD_RI_" ~ mangled ~ "(" ~ curReflection ~ " *cd, void *dd) {\n";
+    cout ~= "cd->__D_data = dd;\n";
+    cout ~= "}\n";
+}
+
+/**
+ * Recursively and reflectively parse a class' bases
+ */
+void parseBaseReflections(xmlNode *node)
+{
+    xmlNode *curNode = null;
+    for (curNode = node.children; curNode; curNode = curNode.next) {
+        if (curNode.type == xmlElementType.XML_ELEMENT_NODE) {
+            if (toString(curNode.name) == "Base") {
+                
+                // find the base class
+                char[] type = toStringFree(xmlGetProp(curNode, "type"));
+                xmlNode *curBCNode = null;
+                for (curBCNode = gccxml.children; curBCNode; curBCNode = curBCNode.next) {
+                    if (curBCNode.type == xmlElementType.XML_ELEMENT_NODE) {
+                        if (type == toStringFree(xmlGetProp(curBCNode, "id"))) {
+                            // parse this one too
+                            parseBaseReflections(curBCNode);
+                        }
+                    }
+                }
+                
+            }
+        }
+    }
+    
+    // then parse this level
+    parseMembers(node, true, false, true);
 }
 
 /**
@@ -752,7 +903,7 @@ void parse_Variable(xmlNode *node, bool inclass)
  */
 void parse_Arguments(xmlNode *node, inout char[] Dargs, inout char[] Deargs,
                      inout char[] Cargs, inout char[] Dcall,
-                     inout char[] Ccall,
+                     inout char[] Ccall, bool reflection = false,
                      int *argc = null)
 {
     int onParam = 0;
@@ -771,19 +922,23 @@ void parse_Arguments(xmlNode *node, inout char[] Dargs, inout char[] Deargs,
                 if (Dargs != "") {
                     Dargs ~= ", ";
                 }
-                Dargs ~= atype.DType ~ " " ~ aname;
+                if (!reflection || (!atype.isClass && !atype.isClassPtr)) {
+                    Dargs ~= atype.DType ~ " " ~ aname;
+                } else {
+                    Dargs ~= "void *" ~ aname;
+                }
                 
-                if (atype.isClass || atype.isClassPtr) {
+                if (!reflection && (atype.isClass || atype.isClassPtr)) {
                     // this becomes a void * in D's view
                     if (Deargs != "") {
                         Deargs ~= ", ";
                     }
-                    Deargs ~= "void *" ~ aname;
+                    Deargs ~= "void *";
                 } else {
                     if (Deargs != "") {
                         Deargs ~= ", ";
                     }
-                    Deargs ~= atype.DType ~ " " ~ aname;
+                    Deargs ~= atype.DType;
                 }
                 
                 if (Cargs != "") {
@@ -794,10 +949,20 @@ void parse_Arguments(xmlNode *node, inout char[] Dargs, inout char[] Deargs,
                 if (Dcall != "") {
                     Dcall ~= ", ";
                 }
-                Dcall ~= aname;
-                if (atype.isClass || atype.isClassPtr) {
-                    // turn this into the real info
-                    Dcall ~= ".__C_data";
+                if (!reflection) {
+                    Dcall ~= aname;
+                    if (atype.isClass || atype.isClassPtr) {
+                        // turn this into the real info
+                        Dcall ~= ".__C_data";
+                    }
+                } else {
+                    if (atype.isClass) {
+                        Dcall ~= "new " ~ atype.className ~ "(cast(ifloat) 0, " ~ aname ~ ")";
+                    } else if (atype.isClassPtr) {
+                        Dcall ~= "cast(" ~ atype.DType ~ ") new " ~ replace(atype.DType, " *", "") ~ "(cast(ifloat) 0, " ~ aname ~ ")";
+                    } else {
+                        Dcall ~= aname;
+                    }
                 }
                 
                 if (atype.isClass) {
@@ -805,7 +970,11 @@ void parse_Arguments(xmlNode *node, inout char[] Dargs, inout char[] Deargs,
                     if (Ccall != "") {
                         Ccall ~= ", ";
                     }
-                    Ccall ~= "*" ~ aname;
+                    if (!reflection) {
+                        Ccall ~= "*" ~ aname;
+                    } else {
+                        Ccall ~= "&" ~ aname;
+                    }
                 } else {
                     if (Ccall != "") {
                         Ccall ~= ", ";
@@ -889,41 +1058,107 @@ void parse_Function_body(xmlNode *node, char[] name, char[] mangled, char[] dema
     }
 }
 
+void parse_Function_reflection(xmlNode *node, char[] name, char[] cname,
+                               char[] mangled, ParsedType type,
+                               char[] Dargs, char[] Deargs, char[] Cargs, char[] Dcall, char[] Ccall)
+{
+    // tie to the particular class being reflected
+    mangled ~= "__" ~ curReflection;
+
+    // make sure it's not already reflected
+    char[] fid = name ~ "(" ~ Deargs ~ ")";
+    if (fid in reflectedFunctions) return;
+    reflectedFunctions[fid] = true;
+    
+    // make sure it's virtual
+    char* isvirtual = xmlGetProp(node, "virtual");
+    if (isvirtual) free(isvirtual);
+    else return;
+    
+    // the C++ interface to the reflection
+    cout ~= "int _BCD_R_" ~ mangled ~ "_CHECK(void *);\n";
+    
+    if (Cargs != "")
+        cout ~= type.CType ~ " _BCD_R_" ~ mangled ~ "(void *, " ~ Cargs ~ ");\n";
+    else
+        cout ~= type.CType ~ " _BCD_R_" ~ mangled ~ "(void *);\n";
+    
+    reflectionCode ~= type.CType ~ " " ~ name ~ "(" ~ Cargs ~ ") {\n";
+    
+    reflectionCode ~= "if (_BCD_R_" ~ mangled ~ "_CHECK(__D_data))\n";
+    if (type.CType != "void") reflectionCode ~= "return ";
+    
+    reflectionCode ~= "_BCD_R_" ~ mangled ~ "(__D_data";
+    if (Ccall != "") reflectionCode ~= ", ";
+    reflectionCode ~= Ccall ~ ");\n";
+    
+    reflectionCode ~= "else\n";
+    if (type.CType != "void") reflectionCode ~= "return ";
+    reflectionCode ~= curReflectionCBase ~ "::" ~ cname ~ "(" ~ Ccall ~ ");\n";
+    reflectionCode ~= "}\n";
+    
+    // and the D interface
+    dhead ~= "extern (C) int _BCD_R_" ~ mangled ~ "_CHECK(" ~ curReflection ~ " x) {\n";
+    dhead ~= "union dp {\n";
+    dhead ~= type.DType ~ " delegate(" ~ Deargs ~ ") d;\n";
+    dhead ~= "struct { void *o; void *f; }\n";
+    dhead ~= "}\n";
+    dhead ~= "dp d; d.d = &x." ~ name ~ ";\n";
+    dhead ~= "return cast(int) (d.f != &" ~ curReflectionDBase ~ "." ~ name ~ ");\n";
+    dhead ~= "}\n";
+    
+    dhead ~= "extern (C) " ~ type.DType ~ " _BCD_R_" ~ mangled ~ "(" ~ curReflection ~ " __D_class, " ~
+    Dargs ~ ") {\n";
+    if (type.DType != "void") dhead ~= "return ";
+    dhead ~= "__D_class." ~ name ~ "(" ~ Dcall ~ ");\n";
+    dhead ~= "}\n";
+}
+
 /**
  * Parse a Method node
  */
-void parse_Method(xmlNode *node)
+void parse_Method(xmlNode *node, bool reflection)
 {
     char[] name = getNName(node);
     char[] mangled = toStringFree(getMangled(node));
     ParsedType type = parseType(toStringFree(xmlGetProp(node, "returns")));
     char[] Dargs;
-    char[] Deargs = "void *This";
-    char[] Cargs = curClass ~ " *This";
-    char[] Dcall = "__C_data";
+    char[] Deargs;
+    if (!reflection) Deargs = "void *This";
+    char[] Cargs;
+    if (!reflection) Cargs = curClass ~ " *This";
+    char[] Dcall;
+    if (!reflection) Dcall = "__C_data";
     char[] Ccall;
     
-    parse_Arguments(node, Dargs, Deargs, Cargs, Dcall, Ccall);
-    parse_Function_body(node, safeName(name), mangled, "This->" ~ name, type,
-                        Dargs, Deargs, Cargs, Dcall, Ccall);
+    parse_Arguments(node, Dargs, Deargs, Cargs, Dcall, Ccall, reflection);
+    if (!reflection)
+        parse_Function_body(node, safeName(name), mangled, "This->" ~ name, type,
+                            Dargs, Deargs, Cargs, Dcall, Ccall);
+    else
+        parse_Function_reflection(node, safeName(name), name, mangled, type,
+                                  Dargs, Deargs, Cargs, Dcall, Ccall);
 }
 
 /**
  * Parse an OperatorMethod node
  */
-void parse_OperatorMethod(xmlNode *node)
+void parse_OperatorMethod(xmlNode *node, bool reflection)
 {
     char[] name = toStringFree(xmlGetProp(node, "name"));;
     char[] mangled = toStringFree(getMangled(node));
     ParsedType type = parseType(toStringFree(xmlGetProp(node, "returns")));
     char[] Dargs;
-    char[] Deargs = "void *This";
-    char[] Cargs = curClass ~ " *This";
-    char[] Dcall = "__C_data";
+    char[] Deargs;
+    if (!reflection) Deargs = "void *This";
+    char[] Cargs;
+    if (!reflection) Cargs = curClass ~ " *This";
+    char[] Dcall;
+    if (!reflection) Dcall = "__C_data";
     char[] Ccall;
     int argc;
     
-    parse_Arguments(node, Dargs, Deargs, Cargs, Dcall, Ccall, &argc);
+    parse_Arguments(node, Dargs, Deargs, Cargs, Dcall, Ccall, reflection, &argc);
     
     // get the D name
     char[] dname;
@@ -1068,8 +1303,12 @@ void parse_OperatorMethod(xmlNode *node)
     
     if (dname == "") return;
     
-    parse_Function_body(node, dname, mangled, "This->" ~ name, type,
-                        Dargs, Deargs, Cargs, Dcall, Ccall);
+    if (!reflection)
+        parse_Function_body(node, dname, mangled, "This->" ~ name, type,
+                            Dargs, Deargs, Cargs, Dcall, Ccall);
+    else
+        parse_Function_reflection(node, dname, name, mangled, type,
+                                  Dargs, Deargs, Cargs, Dcall, Ccall);
 }
 
 /**
@@ -1101,40 +1340,73 @@ void parse_Function(xmlNode *node)
 /**
  * Parse a Constructor node
  */
-void parse_Constructor(xmlNode *node)
+void parse_Constructor(xmlNode *node, bool reflection)
 {
     if (outputC) return; // no constructors in C
     
     char[] name = getNName(node);
     char[] mangled = toStringFree(getMangled(node));
+    if (reflection) mangled ~= "_R";
     
     while (find(mangled, "*INTERNAL*") != -1) {
         mangled = replace(mangled, " *INTERNAL* ", "");
     }
     
     char[] Dargs;
-    char[] Deargs = "void *This";
+    char[] Deargs;
+    if (!reflection) Deargs = "void *";
     char[] Cargs;
-    if (outputC) {
-        Cargs = "struct " ~ curClass ~ " *This";
-    } else {
-        Cargs = curClass ~ " *This";
+    if (!reflection) {
+        if (outputC) {
+            Cargs = "struct " ~ curClass ~ " *This";
+        } else {
+            Cargs = curClass ~ " *This";
+        }
     }
-    char[] Dcall = "__C_data";
+    char[] Dcall;
+    if (!reflection) Dcall = "__C_data";
     char[] Ccall;
     
-    parse_Arguments(node, Dargs, Deargs, Cargs, Dcall, Ccall);
+    if (reflection) {
+        // only reflect one level of constructors
+        if (name != curReflectionDBase) return;
+    }
+    
+    parse_Arguments(node, Dargs, Deargs, Cargs, Dcall, Ccall, reflection);
+    
+    if (reflection) {
+        // make sure it's not already reflected
+        char[] fid = name ~ "(" ~ Deargs ~ ")";
+        if (fid in reflectedFunctions) return;
+        reflectedFunctions[fid] = true;
+    }
     
     dhead ~= "extern (C) void *_BCD_new_" ~ mangled ~ "(" ~ Deargs ~ ");\n";
     
     dtail ~= "this(" ~ Dargs ~ ") {\n";
     dtail ~= "super(cast(ifloat) 0);\n";
     dtail ~= "__C_data = _BCD_new_" ~ mangled ~ "(" ~ Dcall ~ ");\n";
+    if (reflection) {
+        dtail ~= curReflectionInit ~ "(__C_data, cast(void *) this);\n";
+    }
     dtail ~= "}\n";
     
-    cout ~= curClass ~ " *_BCD_new_" ~ mangled ~ "(" ~ Cargs ~ ") {\n";
-    cout ~= "return new " ~ curClass ~ "(" ~ Ccall ~ ");\n";
-    cout ~= "}\n";
+    if (!reflection) {
+        cout ~= curClass ~ " *_BCD_new_" ~ mangled ~ "(" ~ Cargs ~ ") {\n";
+        cout ~= "return new ";
+        cout ~= curClass;
+        cout ~= "(" ~ Ccall ~ ");\n";
+        cout ~= "}\n";
+    } else {
+        reflectionCode ~= curReflection ~ "(" ~ Cargs ~ ") : " ~ curReflectionCBase ~ "(" ~ Ccall ~ ") {}\n";
+        reflectionPostCode ~= curReflection ~ " *_BCD_new_" ~ mangled ~ "(" ~ Cargs ~ ") {\n";
+        reflectionPostCode ~= "return new ";
+        reflectionPostCode ~= curReflection;
+        reflectionPostCode ~= "(" ~ Ccall ~ ");\n";
+        reflectionPostCode ~= "}\n";
+    }
+
+    hasPublicConstructor = true;
 }
 
 /**
@@ -1376,6 +1648,13 @@ ParsedType parseType(char[] type)
                         ParsedType pt = new ParsedType(baseType);
                         pt.DType ~= " *";
                         pt.isClassPtr = true;
+                        
+                        // if this is a const, our const will be on the wrong side!
+                        if (pt.CType.length >= 7 &&
+                            pt.CType[pt.CType.length - 7 .. pt.CType.length] == "* const") {
+                            pt.CType[pt.CType.length - 7 .. pt.CType.length] = "const *";
+                        }
+                        
                         parsedCache[type] = pt;
                     } else {
                         parsedCache[type] = new ParsedType(baseType);
@@ -1418,7 +1697,8 @@ ParsedType parseType(char[] type)
                         // we need to treat this as a pointer in D, but a reference in C
                     
                         // 1) cut off the *
-                        baseType.CType = baseType.CType[0 .. baseType.CType.length - 2];
+                        int l = rfind(baseType.CType, '*');
+                        if (l != -1) baseType.CType[l] = ' ';
                         
                         // 2) add the &
                         if (outputC) {
@@ -1492,10 +1772,23 @@ ParsedType parseType(char[] type)
                 } else if (nname == "CvQualifiedType") {
                     // this is just a const
                     ParsedType pt = parseType(toStringFree(xmlGetProp(curNode, "type")));
-                
-                    if (pt.CType.length < 6 ||
+                    
+                    /*if (pt.CType.length >= 2) {
+                        char[] pfix = pt.CType[pt.CType.length - 2 .. pt.CType.length];
+                        if (pfix == " *" ||
+                            pfix == " &") {
+                            pt.CType = pt.CType[0 .. pt.CType.length - 2] ~
+                            " const" ~ pfix;
+                            parsedCache[type] = pt;
+                            break;
+                        }
+                    }*/
+                    
+                    /*if (pt.CType.length < 6 ||
                         pt.CType[0..6] != "const ")
-                        pt.CType = "const " ~ pt.CType;
+                        pt.CType = "const " ~ pt.CType;*/
+                    pt.CType ~= " const";
+                    
                     parsedCache[type] = pt;
                 
                 } else if (nname == "Typedef") {
