@@ -325,6 +325,7 @@ char[] safeName(char[] name)
     if (name == "alias" ||
         name == "align" ||
         name == "body" ||
+        name == "debug" ||
         name == "final" ||
         name == "function" ||
         name == "in" ||
@@ -332,6 +333,7 @@ char[] safeName(char[] name)
         name == "module" ||
         name == "out" ||
         name == "override" ||
+        name == "package" ||
         name == "scope" ||
         name == "version") {
         ret ~= "_";
@@ -670,6 +672,7 @@ void parse_Class(xmlNode *node)
     dtail ~= "this(ifloat ignore, void *x) {\n";
     dtail ~= "super(ignore);\n";
     dtail ~= "__C_data = x;\n";
+    dtail ~= "__C_data_owned = false;\n";
     dtail ~= "}\n";
     
     cout ~= "void _BCD_delete_" ~ mangled ~ "(" ~ demangled ~ " *This) {\n";
@@ -679,7 +682,7 @@ void parse_Class(xmlNode *node)
     dhead ~= "extern (C) void _BCD_delete_" ~ mangled ~ "(void *);\n";
     
     dtail ~= "~this() {\n";
-    dtail ~= "if (__C_data) _BCD_delete_" ~ mangled ~ "(__C_data);\n";
+    dtail ~= "if (__C_data && __C_data_owned) _BCD_delete_" ~ mangled ~ "(__C_data);\n";
     dtail ~= "__C_data = null;\n";
     dtail ~= "}\n";
     
@@ -691,6 +694,7 @@ void parse_Class(xmlNode *node)
         dtail ~= "this() {\n";
         dtail ~= "super(cast(ifloat) 0);\n";
         dtail ~= "__C_data = _BCD_new_" ~ mangled ~ "();\n";
+        dtail ~= "__C_data_owned = true;\n";
         dtail ~= "}\n";
         cout ~= demangled ~ " *_BCD_new_" ~ mangled ~ "() {\n";
         cout ~= "return new " ~ demangled ~ "();\n";
@@ -714,7 +718,7 @@ void parse_Class(xmlNode *node)
     dhead ~= "extern (C) void _BCD_delete_" ~ mangled ~ "__" ~ curReflection ~ "(void *This);\n";
 
     dtail ~= "~this() {\n";
-    dtail ~= "if (__C_data) _BCD_delete_" ~ mangled ~ "__" ~ curReflection ~ "(__C_data);\n";
+    dtail ~= "if (__C_data && __C_data_owned) _BCD_delete_" ~ mangled ~ "__" ~ curReflection ~ "(__C_data);\n";
     dtail ~= "__C_data = null;\n";
     dtail ~= "}\n";
     
@@ -747,6 +751,7 @@ void parse_Class(xmlNode *node)
         dtail ~= "this() {\n";
         dtail ~= "super(cast(ifloat) 0);\n";
         dtail ~= "__C_data = _BCD_new_" ~ mangled ~ "__" ~ curReflection ~ "();\n";
+        dtail ~= "__C_data_owned = true;\n";
         dtail ~= "}\n";
         cout ~= curReflection ~ " *_BCD_new_" ~ mangled ~ "__" ~ curReflection ~ "() {\n";
         cout ~= "return new " ~ curReflection ~ "();\n";
@@ -859,7 +864,7 @@ void parse_Variable(xmlNode *node, bool inclass)
             dtail ~= "}\n";
         
             cout ~= type.CType ~ " _BCD_get_" ~ mangled ~ "(" ~ curClass ~ " *This) {\n";
-            cout ~= "return (" ~ type.CType ~ ") ";
+            cout ~= "return ";
             if (type.isClass) cout ~= "&";
             cout ~= "This->" ~ name ~ ";\n";
             cout ~= "}\n";
@@ -890,7 +895,7 @@ void parse_Variable(xmlNode *node, bool inclass)
             dtail ~= "}\n";
         
             cout ~= type.CType ~ " _BCD_get_" ~ mangled ~ "() {\n";
-            cout ~= "return (" ~ type.CType  ~ ") ";
+            cout ~= "return ";
             if (type.isClass) cout ~= "&";
             cout ~= demangled ~ ";\n";
             cout ~= "}\n";
@@ -1039,7 +1044,7 @@ void parse_Function_body(xmlNode *node, char[] name, char[] mangled, char[] dema
     
         cout ~= type.CType ~ " _BCD_" ~ mangled ~ "(" ~ Cargs ~ ") {\n";
         if (type.DType != "void") {
-            cout ~= "return (" ~ type.CType ~ ") ";
+            cout ~= "return ";
         }
         cout ~= "(" ~ demangled ~ "(" ~ Ccall ~ "));\n";
         cout ~= "}\n";
@@ -1304,10 +1309,10 @@ void parse_OperatorMethod(xmlNode *node, bool reflection)
     if (dname == "") return;
     
     if (!reflection)
-        parse_Function_body(node, dname, mangled, "This->" ~ name, type,
+        parse_Function_body(node, dname, mangled, "This->operator" ~ name, type,
                             Dargs, Deargs, Cargs, Dcall, Ccall);
     else
-        parse_Function_reflection(node, dname, name, mangled, type,
+        parse_Function_reflection(node, dname, "operator" ~ name, mangled, type,
                                   Dargs, Deargs, Cargs, Dcall, Ccall);
 }
 
@@ -1354,17 +1359,8 @@ void parse_Constructor(xmlNode *node, bool reflection)
     
     char[] Dargs;
     char[] Deargs;
-    if (!reflection) Deargs = "void *";
     char[] Cargs;
-    if (!reflection) {
-        if (outputC) {
-            Cargs = "struct " ~ curClass ~ " *This";
-        } else {
-            Cargs = curClass ~ " *This";
-        }
-    }
     char[] Dcall;
-    if (!reflection) Dcall = "__C_data";
     char[] Ccall;
     
     if (reflection) {
@@ -1372,7 +1368,7 @@ void parse_Constructor(xmlNode *node, bool reflection)
         if (name != curReflectionDBase) return;
     }
     
-    parse_Arguments(node, Dargs, Deargs, Cargs, Dcall, Ccall, reflection);
+    parse_Arguments(node, Dargs, Deargs, Cargs, Dcall, Ccall, false);
     
     if (reflection) {
         // make sure it's not already reflected
@@ -1386,6 +1382,7 @@ void parse_Constructor(xmlNode *node, bool reflection)
     dtail ~= "this(" ~ Dargs ~ ") {\n";
     dtail ~= "super(cast(ifloat) 0);\n";
     dtail ~= "__C_data = _BCD_new_" ~ mangled ~ "(" ~ Dcall ~ ");\n";
+    dtail ~= "__C_data_owned = true;\n";
     if (reflection) {
         dtail ~= curReflectionInit ~ "(__C_data, cast(void *) this);\n";
     }
@@ -1610,6 +1607,9 @@ ParsedType parseType(char[] type)
                             parsedCache[type] = new ParsedType("unsigned char", "char");
                             break;
                         
+                        case "wchar_t":
+                            parsedCache[type] = new ParsedType("wchar_t", "wchar");
+                            break;
                         
                         case "bool":
                             parsedCache[type] = new ParsedType("bool", "bool");
@@ -1803,9 +1803,15 @@ ParsedType parseType(char[] type)
                     rpt.isFunction = pt.isFunction;
                     parsedCache[type] = rpt;
                 
-                } else if (nname == "FunctionType") {
+                } else if (nname == "FunctionType" || nname == "MethodType") {
                     // make a typedef and an alias
                     static bool[char[]] handledFunctions;
+
+                    char[] base = "";
+                    if (nname == "MethodType") {
+                        base = parseType(toStringFree(xmlGetProp(curNode, "basetype"))).CType;
+                        base[base.length - 2 .. base.length] = "::";
+                    }
                 
                     if (!(type in handledFunctions)) {
                         handledFunctions[type] = true;
@@ -1815,7 +1821,7 @@ ParsedType parseType(char[] type)
                         
                         bool first = true;
                         couta = "typedef " ~ pt.CType ~
-                        " (*_BCD_func_" ~ type ~ ")(";
+                        " (*" ~ base ~ "_BCD_func_" ~ type ~ ")(";
                         dheada = "alias " ~ pt.DType ~ " function(";
                     
                         // now look for arguments
@@ -1855,11 +1861,18 @@ ParsedType parseType(char[] type)
                         dhead ~= dheada ~ ") _BCD_func_" ~ type ~ ";\n";
                     }
                 
-                    ParsedType pt = new ParsedType("_BCD_func_" ~ type, "_BCD_func_" ~ type);
-                    pt.isFunction = true;
+                    ParsedType pt;
+                    if (nname != "MethodType") {
+                        pt = new ParsedType("_BCD_func_" ~ type, "_BCD_func_" ~ type);
+                        pt.isFunction = true;
+                    } else {
+                        writefln("WARNING: method types/delegates are not yet supported");
+                        pt = new ParsedType("_BCD_func_" ~ type, "bcd.bind.CXXDelegate");
+                        pt.isFunction = true;
+                    }
                 
                     parsedCache[type] = pt;
-             
+
                 } else if (nname == "Enumeration") {
                     if (parseThis(curNode, true)) parse_Enumeration(curNode);
                 

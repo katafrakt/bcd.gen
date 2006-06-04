@@ -29,12 +29,18 @@ class BoundClass {
         __C_data = x;
     }
     void *__C_data = null;
+    bool __C_data_owned = false;
 }
 
 class BCDReflectionException : Exception {
     this(char[] msg) {
         super("BCDReflectionException: " ~ msg);
     }
+}
+
+struct CXXDelegate {
+    void *o;
+    void *f;
 }
 
 class CXXReflectedClass {
