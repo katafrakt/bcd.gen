@@ -178,7 +178,7 @@ int main(char[][] args)
             
             templates ~= temp ~ "<DReflectedClass";
             
-            for (int i = 1; i < count; i++)
+            for (int j = 1; i < count; i++)
                 templates ~= ", DReflectedClass";
             
             templates ~= "> __IGNORE_" ~ temp ~ ";\n";
@@ -1396,9 +1396,9 @@ void parse_Constructor(xmlNode *node, bool reflection)
 
     if (reflection) {
         // make sure it's not already reflected
-        char[] fid = name ~ "(" ~ Deargs ~ ")";
-        if (fid in reflectedFunctions) return;
-        reflectedFunctions[fid] = true;
+        char[] sfid = name ~ "(" ~ Deargs ~ ")";
+        if (sfid in reflectedFunctions) return;
+        reflectedFunctions[sfid] = true;
     }
     
     dhead ~= "extern (C) void *_BCD_new_" ~ mangled ~ "(" ~ Deargs ~ ");\n";
@@ -1738,7 +1738,7 @@ ParsedType parseType(char[] type)
                 
                 } else if (nname == "Struct" || nname == "Class") {
                     char[] className = toStringFree(getDemangled(curNode));
-                    char[] nname = safeName(getNName(curNode));
+                    char[] snname = safeName(getNName(curNode));
                     
                     if (outputC) {
                         char* incomplete = xmlGetProp(curNode, "incomplete");
@@ -1749,7 +1749,7 @@ ParsedType parseType(char[] type)
                                                                "void");
                         } else {
                             parsedCache[type] = new ParsedType("struct " ~ className,
-                                                               nname);
+                                                               snname);
                         }
                     } else {
                         ParsedType pt;
@@ -1780,7 +1780,7 @@ ParsedType parseType(char[] type)
                 
                 } else if (nname == "Union") {
                     char[] className = toStringFree(getDemangled(curNode));
-                    char[] nname = safeName(getNName(curNode));
+                    char[] snname = safeName(getNName(curNode));
                 
                     char* incomplete = xmlGetProp(curNode, "incomplete");
                     if (incomplete) free(incomplete);
@@ -1790,7 +1790,7 @@ ParsedType parseType(char[] type)
                                                            "void");
                     } else {
                         parsedCache[type] = new ParsedType("union " ~ className,
-                                                           nname);
+                                                           snname);
                     }
                 
                 } else if (nname == "CvQualifiedType") {
