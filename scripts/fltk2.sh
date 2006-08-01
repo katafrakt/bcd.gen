@@ -183,5 +183,7 @@ do
           -N"fltk::end_group()" \
           \
           -N"fltk::image_filetypes" \
-          -N"fltk::Menu::get_location(fltk::Widget*, int const*, int, int) const"
+          -N"fltk::Menu::get_location(fltk::Widget*, int const*, int, int) const" \
+          \
+          -N"fltk::Window::backbuffer() const"
 done
