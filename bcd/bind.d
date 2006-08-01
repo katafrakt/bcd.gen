@@ -23,6 +23,10 @@
 
 module bcd.bind;
 
+// make sure _IO_FILE gets defined properly
+import std.c.stdio;
+alias FILE _IO_FILE;
+
 class BoundClass {
     this(ifloat ignore) {}
     this(ifloat ignore, void *x) {
