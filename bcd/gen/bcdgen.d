@@ -292,17 +292,21 @@ int main(char[][] args)
  */
 bool isNumeric(char[] str)
 {
-    bool hase;
-    bool hasdot;
+    bool hase, hasdot, ishex;
     
     for (int i = 0; i < str.length; i++) {
         char c = str[i];
         if (c >= '0' && c <= '9') continue;
+        if (ishex &&
+            ((c >= 'a' && c <= 'f') ||
+             (c >= 'A' && c <= 'F'))) continue;
+            
         
         if (c == 'e' || c == 'E') {
             if (hase) return false;
             hase = true;
         } else if (c == 'x' || c == 'X') {
+            ishex = true;
             if (i != 1) return false;
             if (str[0] != '0') return false;
         } else if (c == '-') {
