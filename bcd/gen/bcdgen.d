@@ -300,7 +300,7 @@ bool isNumeric(char[] str)
         if (ishex &&
             ((c >= 'a' && c <= 'f') ||
              (c >= 'A' && c <= 'F'))) continue;
-            
+        
         
         if (c == 'e' || c == 'E') {
             if (hase) return false;
