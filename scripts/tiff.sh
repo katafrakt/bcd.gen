@@ -1,7 +1,7 @@
 #!/bin/bash
 export CFLAGS="$CFLAGS -I$1"
 
-rm -rf bcd/gtk2
+rm -rf bcd/tiff
 
 for i in tiff tiffio tiffvers
 do
