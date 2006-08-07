@@ -853,7 +853,7 @@ void parse_Struct(xmlNode *node)
 void parse_Variable(xmlNode *node, bool inclass)
 {
     char[] stype = toStringFree(xmlGetProp(node, "type"));
-    ParsedType type = parseType(stype);
+    ParsedType type = parseTypeReturnable(stype);
     char[] name = getNName(node);
     char[] mangled = toStringFree(getMangled(node));
     
@@ -1553,6 +1553,7 @@ class ParsedType {
         pt.isClass = isClass;
         pt.isClassPtr = isClassPtr;
         pt.isFunction = isFunction;
+        pt.isStaticArray = isStaticArray;
         return pt;
     }
     
@@ -1735,9 +1736,9 @@ ParsedType parseType(char[] type)
                     baseType.CType = "_BCD_array_" ~ type;
                     baseType.DType ~= " [" ~ toString(size) ~ "]";
                 
-                    ParsedType t = new ParsedType(baseType);
-                    t.isStaticArray = true;
-                    parsedCache[type] = t;
+                    ParsedType pt = new ParsedType(baseType);
+                    pt.isStaticArray = true;
+                    parsedCache[type] = pt;
                 
                 } else if (nname == "ReferenceType") {
                     ParsedType baseType =
