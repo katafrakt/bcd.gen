@@ -59,6 +59,8 @@ char[] dtail;
 /** The C[++] output */
 char[] cout;
 private {
+/** The base of the D namespace */
+char[] dNamespaceBase;
 /** The class currently being processed */
 char[] curClass;
 /** Is the current class abstract? */
@@ -125,6 +127,8 @@ int main(char[][] args)
         writefln("    class has more than one template parameter, also provide");
         writefln("    the count.");
         writefln("  -N<symbol to ignore>");
+        writefln("  -b");
+        writefln("    Do not prepend 'bcd.' to the D namespace.");
         return 1;
     }
     
@@ -132,6 +136,7 @@ int main(char[][] args)
     char[] templates;
     
     // set the globals
+    dNamespaceBase = "bcd.";
     curFile = args[1];
     baseDir = getDirName(args[1]);
     shortName = getBaseName(args[1]);
@@ -189,6 +194,9 @@ int main(char[][] args)
         } else if (args[i] == "-r") {
             outputReflections = true;
 
+        } else if (args[i] == "-b") {
+            dNamespaceBase = "";
+
         } else {
             writefln("Argument %s not recognized.", args[i]);
         }
@@ -201,7 +209,7 @@ int main(char[][] args)
     
     // some buffers
     dhead = genhead; // the D header (extern (C)'s)
-    dhead ~= "module bcd." ~ dNamespace ~ "." ~ shortName ~ ";\n";
+    dhead ~= "module " ~ dNamespaceBase ~ dNamespace ~ "." ~ shortName ~ ";\n";
     if (!outputC) dhead ~= "import bcd.bind;\n";
     dhead ~= forcedImport;
     
@@ -605,7 +613,7 @@ void parse_File(xmlNode *node)
             }
             
             if (baseName != shortName)
-                dhead ~= "import bcd." ~ dNamespace ~ "." ~ safeName(baseName) ~ ";\n";
+                dhead ~= "import " ~ dNamespaceBase ~ dNamespace ~ "." ~ safeName(baseName) ~ ";\n";
         }
         
         // then others
@@ -619,7 +627,7 @@ void parse_File(xmlNode *node)
                 baseName = safeName(baseName);
                 
                 if (baseName != shortName)
-                    dhead ~= "import bcd." ~ reqDependencies[req] ~ "." ~ safeName(baseName) ~ ";\n";
+                    dhead ~= "import " ~ dNamespaceBase ~ reqDependencies[req] ~ "." ~ safeName(baseName) ~ ";\n";
             }
         }
     } else {
@@ -1393,12 +1401,12 @@ void parse_Constructor(xmlNode *node, bool reflection)
     parse_Arguments(node, Dargs, Deargs, Cargs, Dcall, Ccall, false);
     
     // make sure it's not already defined (particularly problematic for overrides that aren't overrides in D)
-    static bool[char[]] handledCtors;
-    char[] fid = curClass ~ "(" ~ Deargs ~ ")";
-    if (fid in handledCtors) return;
-    handledCtors[fid] = true;
-
-    if (reflection) {
+    if (!reflection) {
+        static bool[char[]] handledCtors;
+        char[] fid = curClass ~ "(" ~ Deargs ~ ")";
+        if (fid in handledCtors) return;
+        handledCtors[fid] = true;
+    } else if (reflection) {
         // make sure it's not already reflected
         char[] sfid = name ~ "(" ~ Deargs ~ ")";
         if (sfid in reflectedFunctions) return;
