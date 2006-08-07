@@ -1156,7 +1156,7 @@ void parse_Method(xmlNode *node, bool reflection)
 {
     char[] name = getNName(node);
     char[] mangled = toStringFree(getMangled(node));
-    ParsedType type = parseType(toStringFree(xmlGetProp(node, "returns")));
+    ParsedType type = parseTypeReturnable(toStringFree(xmlGetProp(node, "returns")));
     char[] Dargs;
     char[] Deargs;
     if (!reflection) Deargs = "void *This";
@@ -1182,7 +1182,7 @@ void parse_OperatorMethod(xmlNode *node, bool reflection)
 {
     char[] name = toStringFree(xmlGetProp(node, "name"));;
     char[] mangled = toStringFree(getMangled(node));
-    ParsedType type = parseType(toStringFree(xmlGetProp(node, "returns")));
+    ParsedType type = parseTypeReturnable(toStringFree(xmlGetProp(node, "returns")));
     char[] Dargs;
     char[] Deargs;
     if (!reflection) Deargs = "void *This";
@@ -1354,7 +1354,7 @@ void parse_Function(xmlNode *node)
     char[] name = getNName(node);
     char[] mangled = toStringFree(getMangled(node));
     char[] demangled = toStringFree(getDemangled(node));
-    ParsedType type = parseType(toStringFree(xmlGetProp(node, "returns")));
+    ParsedType type = parseTypeReturnable(toStringFree(xmlGetProp(node, "returns")));
     char[] Dargs;
     char[] Deargs;
     char[] Cargs;
@@ -1562,6 +1562,26 @@ class ParsedType {
     bool isClass;
     bool isClassPtr;
     bool isFunction;
+    bool isStaticArray;
+}
+
+/**
+ * Get the type of a node in C[++] and D, in a way which can be a D return type
+ */
+ParsedType parseTypeReturnable(char[] type)
+{
+    ParsedType t = parseType(type);
+    if (t.isStaticArray) {
+        // can't return a static array, convert it into a pointer
+        int bloc = rfind(t.DType, '[');
+        if (bloc != -1) {
+            // cut off the [...]
+            t.DType = t.DType[0..bloc] ~ "*";
+            t.isStaticArray = false;
+        }
+    }
+
+    return t;
 }
 
 extern (C) int getpid();
@@ -1715,7 +1735,9 @@ ParsedType parseType(char[] type)
                     baseType.CType = "_BCD_array_" ~ type;
                     baseType.DType ~= " [" ~ toString(size) ~ "]";
                 
-                    parsedCache[type] = new ParsedType(baseType);
+                    ParsedType t = new ParsedType(baseType);
+                    t.isStaticArray = true;
+                    parsedCache[type] = t;
                 
                 } else if (nname == "ReferenceType") {
                     ParsedType baseType =
