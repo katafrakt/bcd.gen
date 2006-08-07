@@ -349,7 +349,8 @@ char[] safeName(char[] name)
         name == "override" ||
         name == "package" ||
         name == "scope" ||
-        name == "version") {
+        name == "version" ||
+        name == "with") {
         ret ~= "_";
     }
     
