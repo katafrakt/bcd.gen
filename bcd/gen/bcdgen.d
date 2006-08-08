@@ -1387,6 +1387,13 @@ void parse_Constructor(xmlNode *node, bool reflection)
     while (find(mangled, "*INTERNAL*") != -1) {
         mangled = replace(mangled, " *INTERNAL* ", "");
     }
+
+    // no artificial constructors
+    char* artificial = xmlGetProp(node, "artificial");
+    if (artificial) {
+        free(artificial);
+        return;
+    }
     
     char[] Dargs;
     char[] Deargs;
