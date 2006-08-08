@@ -1861,6 +1861,7 @@ ParsedType parseType(char[] type)
                     ParsedType rpt = new ParsedType("_BCD_" ~ type ~ "_" ~ aname, pt.DType);
                     rpt.isClass = pt.isClass;
                     rpt.isFunction = pt.isFunction;
+                    rpt.isStaticArray = pt.isStaticArray;
                     parsedCache[type] = rpt;
                 
                 } else if (nname == "FunctionType" || nname == "MethodType") {
