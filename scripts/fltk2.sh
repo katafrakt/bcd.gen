@@ -1,113 +1,37 @@
 #!/bin/bash
 export CXXFLAGS="$CXXFLAGS `fltk2-config --cxxflags`"
 
-rm -rf bcd/fltk2
+#rm -rf bcd/fltk2
 
 # Unsupported:
-# AlignGroup (align is a keyword in D)
-# filename, dirent (totally different from the handling in D, has major collisions)
 # error (variadic functions)
-# FileBrowser, file_chooser, FileChooser (see filename, dirent)
-# HelpView, HelpDialog (array support isn't stable yet)
-# LabelType (array support isn't stable yet)
-# Preferences (variatic functions)
-# TextDisplay (not sure why this doesn't work :( )
+# filename, dirent, FileBrowser, FileInput, FileChooser (untranslated dirent stuff)
 
-for i in \
-FL_API Flags Color Style Rectangle Widget Valuator Adjuster \
-Group BarGroup \
-PixelType Symbol Box \
-Slider Scrollbar Menu Browser \
-Button \
-CheckButton \
-Choice \
-Clock \
-ColorChooser \
-Input ComboBox \
-Cursor \
-CycleButton \
-damage \
-Dial \
-Divider \
-Window DoubleBufferWindow \
-draw \
-events \
-FileIcon \
-FileInput \
-FillDial \
-FillSlider \
-NumericInput FloatInput \
-FL_VERSION \
-Font \
-HighlightButton \
-types Image \
-InputBrowser \
-IntInput \
-InvisibleBox \
-ItemGroup \
-Item \
-layout \
-LightButton \
-LineDial \
-load_plugin \
-math \
-MenuBar \
-PopupMenu MenuBuild \
-MenuWindow \
-Monitor \
-MultiBrowser \
-MultiImage \
-MultiLineInput \
-Output MultiLineOutput \
-PackedGroup \
-ProgressBar \
-RadioButton \
-RadioItem \
-RadioLightButton \
-RepeatButton \
-ReturnButton \
-run \
-ScrollGroup \
-SecretInput \
-SharedImage \
-show_colormap \
-StringList \
-StyleSet \
-TabGroup \
-TextBuffer \
-ThumbWheel \
-TiledGroup \
-TiledImage \
-ToggleButton \
-Tooltip \
-utf \
-ValueInput \
-visual \
-WordwrapInput \
-WordwrapOutput
+for i in Adjuster AlignGroup ask BarGroup Box Browser Button CheckButton Choice Clock ColorChooser Color ComboBox Cursor CycleButton damage Dial Divider DoubleBufferWindow draw events file_chooser FileIcon FillDial FillSlider Flags FL_API FloatInput fltk_cairo FL_VERSION Font gl glut GlWindow Group HelpDialog HelpView HighlightButton Image InputBrowser Input IntInput InvisibleBox ItemGroup Item LabelType layout LightButton LineDial load_plugin math MenuBar MenuBuild Menu MenuWindow Monitor MultiBrowser MultiImage MultiLineInput MultiLineOutput NumericInput Output PackedGroup PixelType pnmImage PopupMenu Preferences ProgressBar RadioButton RadioItem RadioLightButton Rectangle RepeatButton ReturnButton rgbImage run Scrollbar ScrollGroup SecretInput ShapedWindow SharedImage show_colormap Slider StatusBarGroup string StringList Style StyleSet Symbol SystemMenuBar TabGroup TextBuffer TextDisplay TextEditor ThumbWheel TiledGroup TiledImage ToggleButton Tooltip types utf Valuator ValueInput ValueOutput ValueSlider visual Widget Window WizardGroup WordwrapInput WordwrapOutput xbmImage xpmImage
 do
         echo $i
         
-        ./bcdgen $1/${i}.h fltk2 -Ifltk/ \
-          -N"fltk::Symbol::Symbol(char const*)" \
+        ./bcdgen $1/${i}.h fltk2 -Ifltk/ -r \
+          -N"fltk::GlutWindow::menu" \
+          -N"fltk::HelpTarget::name" \
+          -N"fltk::HelpLink::filename" \
+          -N"fltk::HelpLink::name" \
+          -N"fltk::HelpBlock::line" \
+          -N"fltk::image_filetypes" \
+          -N"fltk::Scrollbar::value()" \
+          -N"fltk::Scrollbar::value(int, int, int, int)" \
+          -N"fltk::Browser::focus_index() const" \
+          -N"fltk::Browser::value() const" \
+          -N"fltk::Browser::value(int)" \
           -N"fltk::ColorChooser::h() const" \
           -N"fltk::ColorChooser::r() const" \
           -N"fltk::ColorChooser::b() const" \
-          -N"fltk::Widget::position(int, int)" \
-          -N"fltk::FileInput::text(char const*)" \
-          -N"fltk::FileInput::text(char const*, int)" \
-          -N"fltk::Widget::type() const" \
-          -N"fltk::Scrollbar::value()" \
-          -N"fltk::Browser::focus_index() const" \
-          -N"fltk::Browser::value(int)" \
-          -N"fltk::Image::Image(char const*)" \
-          -N"fltk::Image::Image(int, int, char const*, char const* const*)" \
-          \
-          -N"fltk::Input::maybe_do_callback()" \
-          -N"fltk::end_group()" \
-          \
-          -N"fltk::image_filetypes" \
-          -N"fltk::Menu::get_location(fltk::Widget*, int const*, int, int) const" \
-          \
-          -N"fltk::Window::backbuffer() const"
+          -N"fltk::Input::position(int, int)" \
+          -N"fltk::ComboBox::position(int, int)" \
+          -N"fltk::HelpView::resize(int, int, int, int)" \
+          -N"fltk::HelpView::textsize(int)" \
+          -N"fltk::HelpView::textsize() const" \
+          -N"fltk::Item::type() const" \
+          -N"fltk::Window::backbuffer() const" \
+          -N"fltk::end_group()"
 done

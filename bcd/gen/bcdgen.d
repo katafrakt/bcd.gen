@@ -290,7 +290,7 @@ int main(char[][] args)
         std.file.remove("bcd/" ~ dNamespace ~ "/template_D.h");
     }
     std.file.remove("out.i");
-    std.file.remove("out.xml");
+    //std.file.remove("out.xml");
     
     return 0;
 }
