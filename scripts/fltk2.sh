@@ -33,5 +33,6 @@ do
           -N"fltk::HelpView::textsize() const" \
           -N"fltk::Item::type() const" \
           -N"fltk::Window::backbuffer() const" \
-          -N"fltk::end_group()"
+          -N"fltk::end_group()" \
+          -N"fltk::Browser::load(char const*)"
 done
