@@ -11,7 +11,7 @@ for i in Adjuster AlignGroup ask BarGroup Box Browser Button CheckButton Choice 
 do
         echo $i
         
-        ./bcdgen $1/${i}.h fltk2 -Ifltk/ -r \
+        ./bcdgen $1/${i}.h fltk2 -Ifltk/ -r -E -P -DV \
           -N"fltk::GlutWindow::menu" \
           -N"fltk::HelpTarget::name" \
           -N"fltk::HelpLink::filename" \

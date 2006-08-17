@@ -1,10 +1,13 @@
 /**
  * Generate bindings for C[++] in D
  * 
- * Authors: Gregor Richards
+ * Authors:
+ *  Gregor Richards
+ *  Tomas "MrSunshine" Wilhelmsson
  * 
  * License:
  *  Copyright (C) 2006  Gregor Richards
+ *  Copyright (C) 2006  Tomas "MrSunshine" Wilhelmsson
  *  
  *  This program is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU General Public License
@@ -73,11 +76,14 @@ bool hasPublicConstructor;
 bool outputC;
 /** Should we output symbols provided by any header in the dir? */
 bool outputAll;
+/** Should we generate default values? */
+bool defaultValues = false;
 /** Should we generate consts for enums? */
 bool outputEnumConst;
 /** Should we output reflections? */
 bool outputReflections;
 /** Other BCD requirements */
+bool polluteNamespace = false;
 char[][char[]] reqDependencies;
 /** The root to the XML tree */
 xmlNode *gccxml = null;
@@ -127,8 +133,12 @@ int main(char[][] args)
         writefln("    class has more than one template parameter, also provide");
         writefln("    the count.");
         writefln("  -N<symbol to ignore>");
+        writefln("  -P");
+        writefln("    Pollute namespaces (make named enum values public)");
         writefln("  -b");
         writefln("    Do not prepend 'bcd.' to the D namespace.");
+        writefln("  -DV");
+        writefln("    Generate default values for function arguments.");
         return 1;
     }
     
@@ -187,7 +197,8 @@ int main(char[][] args)
                 templates ~= ", DReflectedClass";
             
             templates ~= "> __IGNORE_" ~ temp ~ ";\n";
-            
+        } else if (args[i] == "-P") {
+            polluteNamespace = true;
         } else if (args[i] == "-E") {
             outputEnumConst = true;
             
@@ -196,7 +207,8 @@ int main(char[][] args)
 
         } else if (args[i] == "-b") {
             dNamespaceBase = "";
-
+        } else if (args[i] == "-DV") {
+            defaultValues = true;
         } else {
             writefln("Argument %s not recognized.", args[i]);
         }
@@ -941,18 +953,31 @@ void parse_Arguments(xmlNode *node, inout char[] Dargs, inout char[] Deargs,
     for (curNode = node.children; curNode; curNode = curNode.next) {
         if (curNode.type == xmlElementType.XML_ELEMENT_NODE) {
             char[] nname = toString(curNode.name);
-            
+            char[] def = toString(xmlGetProp(curNode, "default"));
+
+            if(def == "NULL")
+                def = "null";
+
             if (nname == "Argument") {
                 ParsedType atype = parseType(toStringFree(xmlGetProp(curNode, "type")));
                 char[] aname = getNName(curNode);
                 if (aname == "") aname = "_" ~ toString(onParam);
                 aname = safeName(aname);
                 
+                if(def == "0" &&
+                   (find(atype.DType, "*") != -1 ||
+                    atype.isFunctionPtr))
+                    def = "null";
+
                 if (Dargs != "") {
                     Dargs ~= ", ";
                 }
+                
                 if (!reflection || (!atype.isClass && !atype.isClassPtr)) {
-                    Dargs ~= atype.DType ~ " " ~ aname;
+                    if(def != "" && defaultValues)
+                        Dargs ~= atype.DType ~ " " ~ aname ~ " = " ~ def;
+                    else
+                        Dargs ~= atype.DType ~ " " ~ aname;
                 } else {
                     Dargs ~= "void *" ~ aname;
                 }
@@ -1498,27 +1523,45 @@ void parse_Enumeration(xmlNode *node)
     if (!(type in handledEnums)) {
         handledEnums[type] = true;
         
-        if (aname[0] == '.') return;
-        
-        dhead ~= "enum " ~ safeName(aname) ~ " {\n";
-        
         xmlNode *curNode = null;
         
-        for (curNode = node.children; curNode; curNode = curNode.next) {
-            if (curNode.type == xmlElementType.XML_ELEMENT_NODE) {
-                char[] nname = toString(curNode.name);
+        if (aname[0] != '.')
+        {
+        
+            dhead ~= "enum " ~ safeName(aname) ~ " {\n";
+        
+        
+            for (curNode = node.children; curNode; curNode = curNode.next) {
+                if (curNode.type == xmlElementType.XML_ELEMENT_NODE) {
+                    char[] nname = toString(curNode.name);
                 
-                if (nname == "EnumValue") {
-                    dhead ~= safeName(getNName(curNode)) ~ "=" ~
-                    toStringFree(xmlGetProp(curNode, "init")) ~ ",\n";
-                } else {
-                    writefln("I don't know how to parse %s!", nname);
+                    if (nname == "EnumValue") {
+                        dhead ~= safeName(getNName(curNode)) ~ "=" ~
+                        toStringFree(xmlGetProp(curNode, "init")) ~ ",\n";
+                    } else {
+                        writefln("I don't know how to parse %s!", nname);
+                    }
                 }
             }
+        
+            dhead ~= "}\n";
+
+            if(polluteNamespace)
+            {
+	        for (curNode = node.children; curNode; curNode = curNode.next) {
+	            if (curNode.type == xmlElementType.XML_ELEMENT_NODE) {
+	                char[] nname = toString(curNode.name);
+                
+                	if (nname == "EnumValue") {
+                            dhead ~= "alias " ~ safeName(aname) ~ "." ~ safeName(getNName(curNode)) ~ " " ~
+                            safeName(getNName(curNode)) ~ ";\n";
+		    	} else {
+                	    writefln("I don't know how to parse %s!", nname);
+              		}
+		    }
+		}
+            }
         }
-        
-        dhead ~= "}\n";
-        
         // then generate consts for it
         if (outputEnumConst && !realName) {
             for (curNode = node.children; curNode; curNode = curNode.next) {
@@ -1560,6 +1603,7 @@ class ParsedType {
         pt.isClass = isClass;
         pt.isClassPtr = isClassPtr;
         pt.isFunction = isFunction;
+        pt.isFunctionPtr = isFunctionPtr;
         pt.isStaticArray = isStaticArray;
         return pt;
     }
@@ -1570,6 +1614,7 @@ class ParsedType {
     bool isClass;
     bool isClassPtr;
     bool isFunction;
+    bool isFunctionPtr;
     bool isStaticArray;
 }
 
@@ -1721,8 +1766,10 @@ ParsedType parseType(char[] type)
                         }
                         
                         parsedCache[type] = pt;
-                    } else {
-                        parsedCache[type] = new ParsedType(baseType);
+                    } else if (baseType.isFunction) {
+                        ParsedType pt = new ParsedType(baseType);
+                        pt.isFunctionPtr = true;
+                        parsedCache[type] = pt;
                     }
                     
                 } else if (nname == "ArrayType") {
