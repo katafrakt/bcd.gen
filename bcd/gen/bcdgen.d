@@ -109,6 +109,14 @@ char[][char[]] files;
 
 int main(char[][] args)
 {
+    // figure out what gccxml to use based on the system
+    char[] gccxmlExe;
+    version (Windows) {
+        gccxmlExe = getDirName(args[0]) ~ "\\gccxml_flags.exe";
+    } else {
+        gccxmlExe = "gccxml";
+    }
+    
     if (args.length < 3) {
         writefln("Use:");
         writefln("bcdgen <.h file> <D namespace> [options]");
@@ -254,14 +262,14 @@ int main(char[][] args)
     toString(getenv(outputC ? "CFLAGS" : "CXXFLAGS"));
     
     // preprocess it
-    if (system("gccxml -E -dD " ~ gccxmlopts ~ " -o out.i " ~ args[1])) {
+    if (system(gccxmlExe ~ " -E -dD " ~ gccxmlopts ~ " -o out.i " ~ args[1])) {
         return 2;
     }
     
     parse_Defines();
     
     // xml-ize it
-    if (system("gccxml " ~ gccxmlopts ~
+    if (system(gccxmlExe ~ " " ~ gccxmlopts ~
                " -fxml=out.xml " ~ args[1])) {
         return 2;
     }
@@ -1637,8 +1645,10 @@ ParsedType parseTypeReturnable(char[] type)
     return t;
 }
 
-extern (C) int getpid();
-extern (C) int kill(int, int);
+version (Windows) {} else {
+    extern (C) int getpid();
+    extern (C) int kill(int, int);
+}
 /**
  * Get the type of a node in C[++] and D
  */
@@ -1648,7 +1658,9 @@ ParsedType parseType(char[] type)
     
     int xmlrret;
     
-    if (type == "") kill(getpid(), 11);
+    version (Windows) {} else {
+        if (type == "") kill(getpid(), 11);
+    }
     
     // first find the element matching the type
     if (!(type in parsedCache)) {
