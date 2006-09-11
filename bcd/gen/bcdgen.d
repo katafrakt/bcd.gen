@@ -376,7 +376,12 @@ char[] safeName(char[] name)
     
     ret = replace(ret, ".", "_");
     ret = replace(ret, "-", "_");
-    ret = replace(ret, "<DReflectedClass>", "_D");
+    
+    // drop any template info
+    int tloc = find(ret, '<');
+    if (tloc != -1) {
+        ret = ret[0..tloc] ~ "_D";
+    }
     
     return ret;
 }
