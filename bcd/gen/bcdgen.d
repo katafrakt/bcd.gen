@@ -118,7 +118,7 @@ int main(char[][] args)
     } else {
         gccxmlExe = "gccxml";
     }
-    
+
     if (args.length < 3) {
         writefln("Use:");
         writefln("bcdgen <.h file> <D namespace> [options]");
@@ -151,15 +151,23 @@ int main(char[][] args)
         writefln("    Generate default values for function arguments.");
         return 1;
     }
-    
+
     char[] forcedImport;
     char[] templates;
     
     // set the globals
     dNamespaceBase = "bcd.";
     curFile = args[1];
-    baseDir = getDirName(args[1]);
-    shortName = getBaseName(args[1]);
+    version (Windows) {
+        // get*Name only works with \, but gccxml only works with /
+        curFile = replace(curFile, "\\", "/");
+        char[] backslashName = replace(args[1], "/", "\\");
+        baseDir = getDirName(backslashName);
+        shortName = getBaseName(backslashName);
+    } else {
+        baseDir = getDirName(args[1]);
+        shortName = getBaseName(args[1]);
+    }
     if (find(shortName, '.') != -1) {
         shortName = getName(shortName);
     }
