@@ -112,7 +112,9 @@ int main(char[][] args)
     // figure out what gccxml to use based on the system
     char[] gccxmlExe;
     version (Windows) {
-        gccxmlExe = getDirName(args[0]) ~ "\\gccxml_flags.exe";
+        gccxmlExe = getDirName(args[0]);
+        if (gccxmlExe != "") gccxmlExe ~= "\\";
+        gccxmlExe ~= "gccxml_flags.exe";
     } else {
         gccxmlExe = "gccxml";
     }
