@@ -1,0 +1,10 @@
+DMD=dmd
+
+all: bcdgen.exe gccxml_flags.exe
+
+bcdgen.exe: bcd/gen/bcdgen.d bcd/gen/libxml2.d common/path.d
+	$(DMD) -g bcd/gen/bcdgen.d bcd/gen/libxml2.d common/path.d -ofbcdgen.exe -L-lxml2 -L-lwsock32
+
+gccxml_flags.exe: bcd/gen/gccxml_flags.d common/path.d
+	$(DMD) -g bcd/gen/gccxml_flags.d common/path.d -ofgccxml_flags.exe
+
