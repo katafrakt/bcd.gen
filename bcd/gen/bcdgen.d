@@ -167,7 +167,7 @@ int main(char[][] args)
         // get*Name only works with \, but gccxml only works with /
         curFile = replace(curFile, "\\", "/");
         char[] backslashName = replace(args[1], "/", "\\");
-        baseDir = getDirName(backslashName);
+        baseDir = replace(getDirName(backslashName), "\\", "/");
         shortName = getBaseName(backslashName);
     } else {
         baseDir = getDirName(args[1]);
@@ -465,7 +465,7 @@ bool parseThis(xmlNode *node, bool allowNameless = false)
         // if it's not in a file we should be parsing, don't output it
         if (outputAll) {
             if (files[sfile].length <= baseDir.length ||
-                files[sfile][0..baseDir.length] != baseDir) return false;
+                !fnmatch(files[sfile][0..baseDir.length], baseDir)) return false;
         } else {
             if (files[sfile] != curFile) return false;
         }
@@ -2102,7 +2102,7 @@ void parse_Defines()
                     inOurFile = true;
                     if (outputAll) {
                         if (fname.length <= baseDir.length ||
-                            fname[0..baseDir.length] != baseDir) inOurFile = false;
+                            !fnmatch(fname[0..baseDir.length], baseDir)) inOurFile = false;
                     } else {
                         if (fname != curFile) inOurFile = false;
                     }
