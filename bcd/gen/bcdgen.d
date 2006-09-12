@@ -26,12 +26,17 @@
 
 module bcd.gen.bcdgen;
 
-private import std.file;
-private import std.path;
-private import std.process;
-private import std.stdio;
-private import std.stream;
-private import std.string;
+version (Windows) {
+    import common.path;
+} else {
+    import std.path;
+}
+
+import std.file;
+import std.process;
+import std.stdio;
+import std.stream;
+import std.string;
 
 import std.c.stdlib;
 alias std.string.atoi atoi;
@@ -112,9 +117,9 @@ int main(char[][] args)
     // figure out what gccxml to use based on the system
     char[] gccxmlExe;
     version (Windows) {
-        gccxmlExe = getDirName(args[0]);
-        if (gccxmlExe != "") gccxmlExe ~= "\\";
-        gccxmlExe ~= "gccxml_flags.exe";
+        char[] dir, bname;
+        whereAmI(args[0], dir, bname);
+        gccxmlExe = dir ~ "\\gccxml_flags.exe";
     } else {
         gccxmlExe = "gccxml";
     }
