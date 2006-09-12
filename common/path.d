@@ -45,6 +45,11 @@ void whereAmI(char[] argvz, inout char[] dir, inout char[] bname)
     bname = getBaseName(argvz);
     dir = getDirName(argvz);
     
+    // on Windows, this is a .exe
+    version (Windows) {
+        bname = defaultExt(bname, "exe");
+    }
+    
     // is this a directory?
     if (find(dir, std.path.sep) != -1) return;
     
