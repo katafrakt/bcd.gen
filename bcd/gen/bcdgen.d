@@ -119,7 +119,7 @@ int main(char[][] args)
     version (Windows) {
         char[] dir, bname;
         whereAmI(args[0], dir, bname);
-        gccxmlExe = dir ~ "\\gccxml_flags.exe";
+        gccxmlExe = dir ~ "\\gccxml\\gccxml_flags.exe";
     } else {
         gccxmlExe = "gccxml";
     }
