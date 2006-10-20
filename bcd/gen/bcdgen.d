@@ -378,12 +378,18 @@ char[] safeName(char[] name)
         name == "final" ||
         name == "function" ||
         name == "in" ||
+        name == "int" ||
         name == "inout" ||
+        name == "long" ||
         name == "module" ||
         name == "out" ||
         name == "override" ||
         name == "package" ||
         name == "scope" ||
+        name == "short" ||
+        name == "uint" ||
+        name == "ulong" ||
+        name == "ushort" ||
         name == "version" ||
         name == "with") {
         ret ~= "_";
