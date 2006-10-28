@@ -202,7 +202,7 @@ int main(char[][] args)
             outputAll = true;
             
         } else if (args[i][0..2] == "-F") {
-            forcedImport ~= "import " ~ args[i][2..args[i].length] ~ ";\n";
+            forcedImport ~= "public import " ~ args[i][2..args[i].length] ~ ";\n";
             
         } else if (args[i][0..2] == "-T") {
             char[] temp = args[i][2..args[i].length];
@@ -245,7 +245,7 @@ int main(char[][] args)
     // some buffers
     dhead = genhead; // the D header (extern (C)'s)
     dhead ~= "module " ~ dNamespaceBase ~ dNamespace ~ "." ~ shortName ~ ";\n";
-    if (!outputC) dhead ~= "import bcd.bind;\n";
+    if (!outputC) dhead ~= "public import bcd.bind;\n";
     dhead ~= forcedImport;
     
     cout = genhead; // the C++ output (to name.cc)
@@ -660,7 +660,7 @@ void parse_File(xmlNode *node)
             }
             
             if (baseName != shortName)
-                dhead ~= "import " ~ dNamespaceBase ~ dNamespace ~ "." ~ safeName(baseName) ~ ";\n";
+                dhead ~= "public import " ~ dNamespaceBase ~ dNamespace ~ "." ~ safeName(baseName) ~ ";\n";
         }
         
         // then others
@@ -674,7 +674,7 @@ void parse_File(xmlNode *node)
                 baseName = safeName(baseName);
                 
                 if (baseName != shortName)
-                    dhead ~= "import " ~ dNamespaceBase ~ reqDependencies[req] ~ "." ~ safeName(baseName) ~ ";\n";
+                    dhead ~= "public import " ~ dNamespaceBase ~ reqDependencies[req] ~ "." ~ safeName(baseName) ~ ";\n";
             }
         }
     } else {

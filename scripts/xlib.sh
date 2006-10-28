@@ -1,7 +1,7 @@
 #!/bin/bash
 rm -rf bcd/xlib
 
-for i in X Xlib Xutil
+for i in X Xlib Xutil extensions/Xrender
 do
         echo $i
         
