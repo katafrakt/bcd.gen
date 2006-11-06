@@ -8,3 +8,12 @@ echo gdk
   -Fbcd.cairo.cairo \
   -Fbcd.pango.pango \
   -Fbcd.glib2.glib
+
+echo gdkx
+./bcdgen $1/gdkx.h gdk -C \
+  -Fbcd.cairo.cairo \
+  -Fbcd.pango.pango \
+  -Fbcd.glib2.glib \
+  -Fbcd.xlib.Xlib \
+  -Fbcd.xlib.Xutil
+

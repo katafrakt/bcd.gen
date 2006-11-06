@@ -905,7 +905,7 @@ void parse_Variable(xmlNode *node, bool inclass)
     
     if (outputC) {
         if (!inclass) {
-            dtail ~= "extern (C) ";
+            dtail ~= "extern (C) extern ";
         }
         dtail ~= type.DType ~ " " ~ safeName(name) ~ ";\n";
     } else {
