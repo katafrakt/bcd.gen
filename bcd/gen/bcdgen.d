@@ -899,16 +899,18 @@ void parse_Struct(xmlNode *node)
 void parse_Variable(xmlNode *node, bool inclass)
 {
     char[] stype = toStringFree(xmlGetProp(node, "type"));
-    ParsedType type = parseTypeReturnable(stype);
+    ParsedType type;
     char[] name = getNName(node);
     char[] mangled = toStringFree(getMangled(node));
     
     if (outputC) {
+        type = parseType(stype);
         if (!inclass) {
             dtail ~= "extern (C) extern ";
         }
         dtail ~= type.DType ~ " " ~ safeName(name) ~ ";\n";
     } else {
+        type = parseTypeReturnable(stype);
         if (inclass) {
             // if it's a const, don't make the set
             if (stype[stype.length - 1] != 'c') {
