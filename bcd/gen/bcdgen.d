@@ -1110,7 +1110,8 @@ void parse_Arguments(xmlNode *node, inout char[] Dargs, inout char[] Deargs,
 }
 
 void parse_Function_body(xmlNode *node, char[] name, char[] mangled, char[] demangled, ParsedType type,
-                         char[] Dargs, char[] Deargs, char[] Cargs, char[] Dcall, char[] Ccall)
+                         char[] Dargs, char[] Deargs, char[] Cargs, char[] Dcall, char[] Ccall,
+                         bool isStatic = false)
 {
     // make sure it's not already defined (particularly problematic for overrides that aren't overrides in D)
     static bool[char[]] handledFunctions;
@@ -1126,7 +1127,8 @@ void parse_Function_body(xmlNode *node, char[] name, char[] mangled, char[] dema
     dhead ~= "extern (C) " ~ type.DType ~ " _BCD_" ~ mangled ~ "(" ~ Deargs ~ ");\n";
     
     if (!type.isClass) {
-        dtail ~= type.DType ~ " " ~ name ~ "(" ~ Dargs ~ ") {\n";
+        dtail ~= (isStatic ? "static " : "") ~
+            type.DType ~ " " ~ name ~ "(" ~ Dargs ~ ") {\n";
         if (type.DType != "void") {
             dtail ~= "return ";
         }
@@ -1215,6 +1217,13 @@ void parse_Function_reflection(xmlNode *node, char[] name, char[] cname,
  */
 void parse_Method(xmlNode *node, bool reflection)
 {
+    /* If it's static, it's for all intents and purposes a function */
+    if (toStringFree(xmlGetProp(node, "static")) == "1") {
+        if (!reflection)
+            parse_Function(node, true);
+        return;
+    }
+    
     char[] name = getNName(node);
     char[] mangled = toStringFree(getMangled(node));
     ParsedType type = parseTypeReturnable(toStringFree(xmlGetProp(node, "returns")));
@@ -1410,7 +1419,7 @@ void parse_OperatorMethod(xmlNode *node, bool reflection)
 /**
  * Parse a Function node
  */
-void parse_Function(xmlNode *node)
+void parse_Function(xmlNode *node, bool isStatic = false)
 {
     char[] name = getNName(node);
     char[] mangled = toStringFree(getMangled(node));
@@ -1430,7 +1439,7 @@ void parse_Function(xmlNode *node)
     
     parse_Arguments(node, Dargs, Deargs, Cargs, Dcall, Ccall);
     parse_Function_body(node, safeName(name), mangled, demangled, type,
-                        Dargs, Deargs, Cargs, Dcall, Ccall);
+                        Dargs, Deargs, Cargs, Dcall, Ccall, isStatic);
 }
 
 /**
