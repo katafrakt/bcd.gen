@@ -274,7 +274,7 @@ int main(char[][] args)
     
     // gccxml options
     char[] gccxmlopts = templates ~ 
-    toString(getenv(outputC ? "CFLAGS" : "CXXFLAGS"));
+    toString(getenv(toStringz(outputC ? "CFLAGS" : "CXXFLAGS")));
     
     // preprocess it
     if (system(gccxmlExe ~ " -E -dD " ~ gccxmlopts ~ " -o out.i " ~ args[1])) {
@@ -357,6 +357,8 @@ bool isNumeric(char[] str)
         } else if (c == '.') {
             if (hasdot) return false;
             hasdot = true;
+        } else if (c == 'L') {
+            if (i != str.length - 1) return false;
         } else {
             return false;
         }
@@ -2127,17 +2129,27 @@ void parse_Defines()
                 
             } else if (lns[0] == "#define" && inOurFile) {
                 // turn the #define into a const int or const double
-                if (lns.length >= 3 &&
-                    isNumeric(lns[2])) {
-                    // int or double?
-                    if (find(lns[2], '.') != -1 ||
-                        find(lns[2], 'e') != -1 ||
-                        find(lns[2], 'E') != -1) {
-                        dhead ~= "const double " ~ safeName(lns[1]) ~
-                        " = " ~ lns[2] ~ ";\n";
-                    } else {
-                        dhead ~= "const int " ~ safeName(lns[1]) ~
-                        " = " ~ lns[2] ~ ";\n";
+                if (lns.length >= 3) {
+                    if (isNumeric(lns[2])) {
+                        /* isNumeric can accept ending with 'L', but long is
+                         * (usually) int, so strip it */
+                        if (lns[2][$-1] == 'L') lns[2] = lns[2][0..$-1];
+                        
+                        // int or double?
+                        if (find(lns[2], '.') != -1 ||
+                            find(lns[2], 'e') != -1 ||
+                            find(lns[2], 'E') != -1) {
+                            dhead ~= "const double " ~ safeName(lns[1]) ~
+                                " = " ~ lns[2] ~ ";\n";
+                        } else {
+                            dhead ~= "const int " ~ safeName(lns[1]) ~
+                                " = " ~ lns[2] ~ ";\n";
+                        }
+                    } else if (lns[2].length >= 2 &&
+                               lns[2][0] == '"' && lns[2][$-1] == '"') {
+                        // a constant string
+                        dhead ~= "const char[] " ~ safeName(lns[1]) ~
+                            " = " ~ lns[2] ~ ";\n";
                     }
                 }
             }
