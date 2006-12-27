@@ -324,7 +324,7 @@ int main(char[][] args)
     if (templates != "") {
         std.file.remove("bcd/" ~ dNamespace ~ "/template_D.h");
     }
-    std.file.remove("out.i");
+    //std.file.remove("out.i");
     //std.file.remove("out.xml");
     
     return 0;
@@ -2104,6 +2104,8 @@ void parse_Defines()
     File f = new File("out.i", FileMode.In);
     bool inOurFile = false;
     
+    bool[char[]] curDefines;
+    
     while (!f.eof()) {
         char[] ln = f.readLine();
         char[][] lns = split(ln);
@@ -2131,6 +2133,8 @@ void parse_Defines()
                 // turn the #define into a const int or const double
                 if (lns.length >= 3) {
                     if (isNumeric(lns[2])) {
+                        curDefines[lns[1]] = true;
+                        
                         /* isNumeric can accept ending with 'L', but long is
                          * (usually) int, so strip it */
                         if (lns[2][$-1] == 'L') lns[2] = lns[2][0..$-1];
@@ -2145,11 +2149,20 @@ void parse_Defines()
                             dhead ~= "const int " ~ safeName(lns[1]) ~
                                 " = " ~ lns[2] ~ ";\n";
                         }
+                        
                     } else if (lns[2].length >= 2 &&
                                lns[2][0] == '"' && lns[2][$-1] == '"') {
+                        curDefines[lns[1]] = true;
+                        
                         // a constant string
                         dhead ~= "const char[] " ~ safeName(lns[1]) ~
                             " = " ~ lns[2] ~ ";\n";
+                        
+                    } else if (lns[2] in curDefines) {
+                        curDefines[lns[1]] = true;
+                        
+                        // could be #define'ing to something already #defined
+                        dhead ~= "alias " ~ safeName(lns[2]) ~ " " ~ safeName(lns[1]) ~ ";\n";
                     }
                 }
             }
