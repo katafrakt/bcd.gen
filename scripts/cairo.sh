@@ -6,6 +6,6 @@ rm -rf bcd/cairo
 echo cairo
 ./bcdgen $1/cairo.h cairo -C -A
 echo cairo-xlib
-./bcdgen $1/cairo-xlib.h cairo -C
+./bcdgen $1/cairo-xlib.h cairo -C -Fbcd.xlib.Xlib
 echo cairo-xlib-xrender
-./bcdgen $1/cairo-xlib-xrender.h cairo -C
+./bcdgen $1/cairo-xlib-xrender.h cairo -C -Fbcd.xlib.Xlib -Fbcd.xlib.Xrender
