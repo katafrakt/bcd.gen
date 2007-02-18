@@ -6,7 +6,7 @@
  *  Tomas "MrSunshine" Wilhelmsson
  * 
  * License:
- *  Copyright (C) 2006  Gregor Richards
+ *  Copyright (C) 2006, 2007  Gregor Richards
  *  Copyright (C) 2006  Tomas "MrSunshine" Wilhelmsson
  *  
  *  This program is free software; you can redistribute it and/or
@@ -41,6 +41,7 @@ import std.string;
 import std.c.stdlib;
 alias std.string.atoi atoi;
 alias std.c.stdlib.free free;
+alias std.process.system system;
 
 private import bcd.gen.libxml2;
 
@@ -244,7 +245,7 @@ int main(char[][] args)
     
     // some buffers
     dhead = genhead; // the D header (extern (C)'s)
-    dhead ~= "module " ~ dNamespaceBase ~ dNamespace ~ "." ~ shortName ~ ";\n";
+    dhead ~= "module " ~ dNamespaceBase ~ dNamespace ~ "." ~ shortName ~ ";\nalign(4):\n";
     if (!outputC) dhead ~= "public import bcd.bind;\n";
     dhead ~= forcedImport;
     
@@ -654,8 +655,8 @@ void parse_File(xmlNode *node)
         
         // import it in D
         
-        // first try our own namespace
-        if (getDirName(sname) == baseDir) {
+        // first try our own namespace if we didn't use -A
+        if (!outputAll && getDirName(sname) == baseDir) {
             char[] baseName = sname[baseDir.length + 1 .. sname.length];
             if (find(baseName, '.') != -1) {
                 baseName = getName(baseName);
