@@ -42,8 +42,8 @@ char[][] getPath()
 void whereAmI(char[] argvz, inout char[] dir, inout char[] bname)
 {
     // split it
-    bname = getBaseName(argvz);
-    dir = getDirName(argvz);
+    bname = baseName(argvz);
+    dir = dirName(argvz);
     
     // on Windows, this is a .exe
     version (Windows) {

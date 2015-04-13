@@ -31,7 +31,7 @@ private import std.string;
 
 private import bcd.gen.libxml2;
 
-extern (C) char* getenv(char*);
+extern (C) char* getenv(immutable(char)*);
 
 // some global variables (yay)
 /** The full path to the current file */
@@ -86,8 +86,8 @@ int main(char[][] args)
     
     // set the globals
     curFile = args[1];
-    baseDir = getDirName(args[1]);
-    shortName = getBaseName(args[1]);
+    baseDir = dirName(args[1]);
+    shortName = baseName(args[1]);
     if (find(shortName, '.') != -1) {
         shortName = getName(shortName);
     }
@@ -133,7 +133,7 @@ int main(char[][] args)
     cout = genhead; // the C++ output (to name.cc)
     cout ~= "#include <stdlib.h>\n";
     cout ~= "#include <string.h>\n";
-    cout ~= "#include \"" ~ incPrefix ~ getBaseName(args[1]) ~ "\"\n";
+    cout ~= "#include \"" ~ incPrefix ~ baseName(args[1]) ~ "\"\n";
     if (!outputC) cout ~= "extern \"C\" {\n";
     
     // make the directories
@@ -419,7 +419,7 @@ void parse_File(xmlNode *node)
         // import it in D
         
         // first try our own namespace
-        if (getDirName(sname) == baseDir) {
+        if (dirName(sname) == baseDir) {
             char[] baseName = sname[baseDir.length + 1 .. sname.length];
             if (find(baseName, '.') != -1) {
                 baseName = getName(baseName);
@@ -431,7 +431,7 @@ void parse_File(xmlNode *node)
         
         // then others
         foreach (req; reqDependencies.keys) {
-            if (getDirName(sname) == req) {
+            if (dirName(sname) == req) {
                 char[] baseName = sname[req.length + 1 .. sname.length];
                 if (find(baseName, '.') != -1) {
                     baseName = getName(baseName);
@@ -1014,7 +1014,7 @@ ParsedType parseType(char[] type, xmlNode *gccxml)
             } else if (nname == "ArrayType") {
                 ParsedType baseType =
                     parseType(toString(xmlGetProp(curNode, "type")), gccxml);
-                int size = atoi(toString(xmlGetProp(curNode, "max"))) + 1;
+                int size = to!int(toString(xmlGetProp(curNode, "max"))) + 1;
                 
                 // make a typedef and an alias
                 static bool[char[]] handledArrays;
