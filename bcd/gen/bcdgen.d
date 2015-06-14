@@ -38,6 +38,7 @@ import std.stdio;
 import std.stream;
 import std.string;
 import std.conv;
+import kxml.xml;
 
 import std.c.stdlib;
 alias std.c.stdlib.free free;
@@ -71,7 +72,7 @@ private {
 /** The base of the D namespace */
 string dNamespaceBase;
 /** The class currently being processed */
-char[] curClass;
+string curClass;
 /** Is the current class abstract? */
 bool curClassAbstract;
 /** Was a constructor made for the current class? */
@@ -92,16 +93,16 @@ bool outputReflections;
 bool polluteNamespace = false;
 char[][char[]] reqDependencies;
 /** The root to the XML tree */
-xmlNode *gccxml = null;
+XmlNode gccxml = null;
 
 /** Class currently being reflected into D */
-char[] curReflection;
+string curReflection;
 /** The base of the class currently being reflected (in C++) */
-char[] curReflectionCBase;
+string curReflectionCBase;
 /** The base of the class currently being reflected (in D) */
-char[] curReflectionDBase;
+string curReflectionDBase;
 /** The initializer for the current reflection */
-char[] curReflectionInit;
+string curReflectionInit;
 /** The C++ code for the class currently being reflected */
 string reflectionCode;
 /** The C++ code to go after we close the class */
@@ -177,7 +178,7 @@ int main(char[][] args)
     if (indexOf(shortName, '.') != -1) {
         shortName = stripExtension(shortName);
     }
-    shortName = safeName(shortName);
+    shortName = to!(char[])(safeName(shortName));
 
     // parse other options
     for (int i = 3; i < args.length; i++) {
@@ -278,10 +279,13 @@ int main(char[][] args)
     to!string(getenv(toStringz(outputC ? "CFLAGS" : "CXXFLAGS")));
 
     // preprocess it
-    auto result = executeShell(gccxmlExe ~ " -E -dD " ~ gccxmlopts ~ args[1] ~ " > out.i");
+    auto command = gccxmlExe ~ " -E -dD " ~ gccxmlopts ~ args[1] ~ " > out.i";
+    auto result = executeShell(command);
     if (result.status) {
         if(result.status == 127) {
             writeln("No gccxml found!");
+        } else {
+            writeln("Command: " ~ command ~ " failed");
         }
         return 2;
     }
@@ -295,22 +299,21 @@ int main(char[][] args)
         return 2;
     }
 
-    // then initialize libxml2
-    xmlDoc *doc = null;
-    xmlNode *rootElement = null;
+    XmlNode doc = null;
+    XmlNode *rootElement = null;
 
     xmlCheckVersion(20621); // the version bcdgen's XML was ported from
 
     // and read it in
-    doc = xmlReadFile((to!(char[])("out.xml")).ptr, null, 0);
+    doc = readDocument(readText("out.xml"));
 
-    if (doc == null) {
+    if (doc is null) {
         writefln("Failed to parse the GCCXML-produced XML file!");
         return 3;
     }
 
     // Get the root element node
-    gccxml = xmlDocGetRootElement(doc);
+    gccxml = doc.parseXPath("//GCC_XML")[0];
 
     parse_GCC_XML();
 
@@ -373,12 +376,15 @@ bool isNumeric(char[] str)
     return true;
 }
 
+string safeName(string name) {
+    return safeName(to!(char[])(name));
+}
 /**
  * Return a name that doesn't stomp on any D keywords
  */
-char[] safeName(char[] name)
+string safeName(char[] name)
 {
-    char[] ret = name[0..name.length];
+    string ret = to!string(name[0..name.length]);
     if (name == "alias" ||
         name == "align" ||
         name == "body" ||
@@ -422,12 +428,12 @@ auto stringToPtr(string str) {
 /**
  * Return name unless it's anonymous, in which case return mangled
  */
-char[] getNName(xmlNode *node)
+string getNName(XmlNode node)
 {
-    char[] name = toStringFree(xmlGetProp(node, stringToPtr("name")));
-    if (name == "") name = toStringFree(xmlGetProp(node, stringToPtr("mangled")));
+    auto name = node.getAttribute("name");
+    if (name == "") name = node.getAttribute("mangled");
     if (name == "") {
-        char[] id = toStringFree(xmlGetProp(node, stringToPtr("id")));
+        auto id = node.getAttribute("id");
         if (id != "")
             name = "_BCD_" ~ id;
     }
@@ -448,76 +454,72 @@ char[] toStringFree(char* from)
 /**
  * Return mangled unless it's not mangled
  */
-char *getMangled(xmlNode *node)
+auto getMangled(XmlNode node)
 {
-    char *mangled = xmlGetProp(node, stringToPtr("mangled"));
-    if (!mangled && outputC) mangled = xmlGetProp(node, stringToPtr("name"));
+    auto mangled = node.getAttribute("mangled");
+    if (!mangled && outputC) mangled = node.getAttribute("name");
     return mangled;
 }
 
 /**
  * Return demangled unless it's not mangled
  */
-char *getDemangled(xmlNode *node)
+auto getDemangled(XmlNode node)
 {
-    char *demangled = xmlGetProp(node, stringToPtr("demangled"));
-    if (!demangled && outputC) demangled = xmlGetProp(node, stringToPtr("name"));
+    auto demangled = node.getAttribute("demangled");
+    if (!demangled && outputC) demangled = node.getAttribute("name");
     return demangled;
 }
 
 /**
  * Do we need to parse this node?
  */
-bool parseThis(xmlNode *node, bool allowNameless = false)
+bool parseThis(XmlNode node, bool allowNameless = false)
 {
     // only parse it if it's in the file we're parsing and it's demanglable
-    char* file = xmlGetProp(node, stringToPtr("file"));
-    char* demangled = getDemangled(node);
-    char* incomplete = xmlGetProp(node, stringToPtr("incomplete"));
-    if (incomplete) free(incomplete);
+    auto file = node.getAttribute("file");
+    auto demangled = getDemangled(node);
+    auto incomplete = node.getAttribute("incomplete");
+    //if (incomplete) free(incomplete);
 
     if (file && (demangled || allowNameless) && !incomplete) {
-        char[] sfile = toStringFree(file);
-        char[] sdemangled = toStringFree(demangled);
+        //char[] sfile = toStringFree(file);
+        //char[] sdemangled = toStringFree(demangled);
 
         // if it's not in a file we should be parsing, don't output it
         if (outputAll) {
-            if (files[sfile].length <= baseDir.length ||
-                !globMatch(files[sfile][0..baseDir.length], baseDir)) return false;
+            if (files[file].length <= baseDir.length ||
+                !globMatch(files[file][0..baseDir.length], baseDir)) return false;
         } else {
-            if (files[sfile] != curFile) return false;
+            if (files[file] != curFile) return false;
         }
 
         // if it's builtin, don't do it
-        char* name = xmlGetProp(node, stringToPtr("name"));
+        auto name = node.getAttribute("name");
         if (name) {
-            char[] sname = toStringFree(name);
-            if (sname.length >= 9 &&
-                sname[0..9] == "__builtin") {
+            if (name.length >= 9 &&
+                name[0..9] == "__builtin") {
                 return false;
             }
         }
 
         // if access is private, don't do it
-        char* access = xmlGetProp(node, stringToPtr("access"));
-        if (access &&
-            toStringFree(access) != "public") {
+        auto access = node.getAttribute("access");
+        if (access && access != "public") {
             return false;
         }
 
         // if we were told to ignore it, do so
-        if (sdemangled.length >= 8 &&
-            sdemangled[0..8] == "__IGNORE") return false;
+        if (demangled.length >= 8 &&
+            demangled[0..8] == "__IGNORE") return false;
         foreach (i; ignoreSyms) {
-            if (sdemangled == i) {
+            if (demangled == i) {
                 return false;
             }
         }
 
         return true;
     } else {
-        if (file) free(file);
-        if (demangled) free(demangled);
         return false;
     }
 }
@@ -525,13 +527,12 @@ bool parseThis(xmlNode *node, bool allowNameless = false)
 /**
  * Parse the members of a node
  */
-void parseMembers(xmlNode *node, bool inclass, bool types, bool reflection = false)
+void parseMembers(XmlNode node, bool inclass, bool types, bool reflection = false)
 {
-    char *members = xmlGetProp(node, stringToPtr("members"));
+    auto members = node.getAttribute("members");
     if (!members) return;
 
-    char[] smembers = toStringFree(members);
-    char[][] memberList = split(smembers);
+    string[] memberList = split(members);
 
     // parse each member in the memberList
     foreach (m; memberList) {
@@ -544,40 +545,39 @@ void parseMembers(xmlNode *node, bool inclass, bool types, bool reflection = fal
  */
 void parse_GCC_XML()
 {
-    xmlNode *curNode = null;
     int xmlrret;
 
     // first parse for files and fundamental types
-    for (curNode = gccxml.children; curNode; curNode = curNode.next) {
-        if (curNode.type == xmlElementType.XML_ELEMENT_NODE) {
-            auto nname = to!string(curNode.name);
-            //writefln("  %s", nname);
+    foreach (XmlNode curNode; gccxml.getChildren()) {
+        if (curNode.isCData() || curNode.isXmlComment() || curNode.isXmlPI())
+            continue;
 
-            if (nname == "File") {
-                parse_File(curNode);
-            }
+        auto nname = curNode.getName();
+        //writefln("  %s", nname);
+
+        if (nname == "File") {
+            parse_File(curNode);
         }
     }
 
     // then parse for namespaces, typedefs, enums (all of which can be top-level)
-    for (curNode = gccxml.children; curNode; curNode = curNode.next) {
-        if (curNode.type == xmlElementType.XML_ELEMENT_NODE) {
-            auto nname = to!string(curNode.name);
+    foreach (XmlNode curNode; gccxml.getChildren()) {
+        if (curNode.isCData() || curNode.isXmlComment() || curNode.isXmlPI())
+            continue;
 
-            writefln("  %s", nname);
+        auto nname = curNode.getName();
 
-            if (nname == "Namespace") {
-                parse_Namespace(curNode);
-            } else if (nname == "Typedef") {
-                parse_Typedef(curNode);
-            } else if (nname == "Enumeration") {
-                parse_Enumeration(curNode);
-            } else if (nname == "Class") {
-                // special case for template classes
-                char[] sname = toStringFree(xmlGetProp(curNode, stringToPtr("name")));
-                if (indexOf (sname, "<DReflectedClass>") != -1) {
-                    parse_Class(curNode);
-                }
+        if (nname == "Namespace") {
+            parse_Namespace(curNode);
+        } else if (nname == "Typedef") {
+            parse_Typedef(curNode);
+        } else if (nname == "Enumeration") {
+            parse_Enumeration(curNode);
+        } else if (nname == "Class") {
+            // special case for template classes
+            auto sname = curNode.getAttribute("name");
+            if (indexOf (sname, "<DReflectedClass>") != -1) {
+                parse_Class(curNode);
             }
         }
     }
@@ -586,63 +586,61 @@ void parse_GCC_XML()
 /**
  * Parse a GCC_XML node for a specified ID
  */
-void parse_GCC_XML_for(char[] parseFor, bool inclass, bool types, bool reflection = false)
+void parse_GCC_XML_for(string parseFor, bool inclass, bool types, bool reflection = false)
 {
-    xmlNode *curNode = null;
     int xmlrret;
 
-    for (curNode = gccxml.children; curNode; curNode = curNode.next) {
-        if (curNode.type == xmlElementType.XML_ELEMENT_NODE) {
-            auto nname = to!string(curNode.name);
+    foreach (XmlNode curNode; gccxml.getChildren()) {
+        if (curNode.isCData() || curNode.isXmlComment())
+            continue;
 
-            char *id = xmlGetProp(curNode, stringToPtr("id"));
-            if (parseFor != toStringFree(id)) continue;
+        auto nname = curNode.getName();
 
-            if (nname == "Constructor") {
-                // this may be private or otherwise unparsable, but we do have one
-                hasConstructor = true;
-            }
+        auto id = curNode.getAttribute("id");
+        if (parseFor != id) continue;
 
-            // types that can be nameless:
-            if (!parseThis(curNode, true)) continue;
+        if (nname == "Constructor") {
+            // this may be private or otherwise unparsable, but we do have one
+            hasConstructor = true;
+        }
 
-            if (nname == "Struct" || nname == "Class") {
-                // structs and classes are the same in C[++]
-                if (outputC) {
-                    if (types) parse_Struct(curNode);
-                } else {
-                    if (types) parse_Class(curNode);
-                }
-                continue;
-            } else if (nname == "Union") {
+        // types that can be nameless:
+        if (!parseThis(curNode, true)) continue;
+
+        if (nname == "Struct" || nname == "Class") {
+            // structs and classes are the same in C[++]
+            if (outputC) {
                 if (types) parse_Struct(curNode);
-                continue;
-            }
-
-            // types that cannot be nameless:
-            if (!parseThis(curNode)) continue;
-
-            //writefln("  %s", nname);
-
-            if (nname == "Variable" || nname == "Field") {
-                if (!types && !reflection) parse_Variable(curNode, inclass);
-            } else if (nname == "Method") {
-                if (!types) parse_Method(curNode, reflection);
-            } else if (nname == "OperatorMethod") {
-                if (!types) parse_OperatorMethod(curNode, reflection);
-            } else if (nname == "Function") {
-                if (!types && !reflection) parse_Function(curNode);
-            } else if (nname == "Constructor") {
-                if (!types) parse_Constructor(curNode, reflection);
-            } else if (nname == "Destructor") {
-                // this code is automatic :)
-            } else if (nname == "Typedef") {
-                if (types && !reflection) parse_Typedef(curNode);
-            } else if (nname == "Enumeration") {
-                if (types && !reflection) parse_Enumeration(curNode);
             } else {
-                writefln("I don't know how to parse %s!", nname);
+                if (types) parse_Class(curNode);
             }
+            continue;
+        } else if (nname == "Union") {
+            if (types) parse_Struct(curNode);
+            continue;
+        }
+
+        // types that cannot be nameless:
+        if (!parseThis(curNode)) continue;
+
+        if (nname == "Variable" || nname == "Field") {
+            if (!types && !reflection) parse_Variable(curNode, inclass);
+        } else if (nname == "Method") {
+            if (!types) parse_Method(curNode, reflection);
+        } else if (nname == "OperatorMethod") {
+            if (!types) parse_OperatorMethod(curNode, reflection);
+        } else if (nname == "Function") {
+            if (!types && !reflection) parse_Function(curNode);
+        } else if (nname == "Constructor") {
+            if (!types) parse_Constructor(curNode, reflection);
+        } else if (nname == "Destructor") {
+            // this code is automatic :)
+        } else if (nname == "Typedef") {
+            if (types && !reflection) parse_Typedef(curNode);
+        } else if (nname == "Enumeration") {
+            if (types && !reflection) parse_Enumeration(curNode);
+        } else {
+            writefln("I don't know how to parse %s!", nname);
         }
     }
 }
@@ -650,16 +648,14 @@ void parse_GCC_XML_for(char[] parseFor, bool inclass, bool types, bool reflectio
 /**
  * Parse a File node
  */
-void parse_File(xmlNode *node)
+void parse_File(XmlNode node)
 {
-    // associate the id with the filename
-    char* id, name;
-    id = xmlGetProp(node, stringToPtr("id"));
-    name = xmlGetProp(node, stringToPtr("name"));
+    auto id = node.getAttribute("id");
+    auto name = node.getAttribute("name");
     if (id && name) {
         auto sname = to!(char[])(name);
 
-        files[to!string(toStringFree(id))] = sname;
+        files[id] = sname;
 
         // import it in D
 
@@ -677,7 +673,7 @@ void parse_File(xmlNode *node)
         // then others
         foreach (req; reqDependencies.keys) {
             if (dirName(sname) == req) {
-                char[] baseName = sname[req.length + 1 .. sname.length];
+                string baseName = name[req.length + 1 .. sname.length];
                 if (indexOf(baseName, '.') != -1) {
                     baseName = stripExtension(baseName);
                 }
@@ -688,16 +684,13 @@ void parse_File(xmlNode *node)
                     dhead ~= "public import " ~ dNamespaceBase ~ reqDependencies[req] ~ "." ~ safeName(baseName) ~ ";\n";
             }
         }
-    } else {
-        if (id) free(id);
-        if (name) free(name);
     }
 }
 
 /**
  * Parse a Namespace node
  */
-void parse_Namespace(xmlNode *node)
+void parse_Namespace(XmlNode node)
 {
     parseMembers(node, false, true);
     parseMembers(node, false, false);
@@ -706,14 +699,14 @@ void parse_Namespace(xmlNode *node)
 /**
  * Parse a Class or Struct node to C++
  */
-void parse_Class(xmlNode *node)
+void parse_Class(XmlNode node)
 {
-    char[] name = getNName(node);
-    char[] mangled = toStringFree(getMangled(node));
-    char[] demangled = toStringFree(getDemangled(node));
-    char[] prevCurClass = curClass;
-    char* isabstract = xmlGetProp(node, stringToPtr("abstract"));
-    if (isabstract) free(isabstract);
+    auto name = getNName(node);
+    auto mangled = getMangled(node);
+    auto demangled = getDemangled(node);
+    auto prevCurClass = curClass;
+    auto isabstract = node.getAttribute("abstract");
+
     curClass = demangled;
     curClassAbstract = isabstract ? true : false;
     hasConstructor = false;
@@ -723,14 +716,12 @@ void parse_Class(xmlNode *node)
 
     // parse for base classes
     auto base = "bcd.bind.BoundClass";
-    xmlNode *curNode = null;
-    for (curNode = node.children; curNode; curNode = curNode.next) {
-        if (curNode.type == xmlElementType.XML_ELEMENT_NODE) {
-            if (to!string(curNode.name) == "Base") {
-                ParsedType pt = parseType(toStringFree(xmlGetProp(curNode, stringToPtr("type"))));
-                base = to!string(pt.DType);
-                break;
-            }
+
+    foreach (XmlNode curNode; node.getChildren()) {
+        if (curNode.getName() == "Base") {
+            ParsedType pt = parseType(curNode.getAttribute("type"));
+            base = to!string(pt.DType);
+            break;
         }
     }
 
@@ -849,26 +840,21 @@ void parse_Class(xmlNode *node)
 /**
  * Recursively and reflectively parse a class' bases
  */
-void parseBaseReflections(xmlNode *node)
+void parseBaseReflections(XmlNode node)
 {
-    xmlNode *curNode = null;
-    for (curNode = node.children; curNode; curNode = curNode.next) {
-        if (curNode.type == xmlElementType.XML_ELEMENT_NODE) {
-            if (to!string(curNode.name) == "Base") {
+    foreach (XmlNode curNode; node.getChildren()) {
+        if (curNode.getName() == "Base") {
 
-                // find the base class
-                char[] type = toStringFree(xmlGetProp(curNode, stringToPtr("type")));
-                xmlNode *curBCNode = null;
-                for (curBCNode = gccxml.children; curBCNode; curBCNode = curBCNode.next) {
-                    if (curBCNode.type == xmlElementType.XML_ELEMENT_NODE) {
-                        if (type == toStringFree(xmlGetProp(curBCNode, stringToPtr("id")))) {
-                            // parse this one too
-                            parseBaseReflections(curBCNode);
-                        }
-                    }
+            // find the base class
+            auto type = curNode.getAttribute("type");
+            
+            foreach (XmlNode curBCNode; gccxml.getChildren()) {
+                if (type == curBCNode.getAttribute("id")) {
+                    // parse this one too
+                    parseBaseReflections(curBCNode);
                 }
-
             }
+
         }
     }
 
@@ -879,13 +865,13 @@ void parseBaseReflections(xmlNode *node)
 /**
  * Parse a Struct or Union node to C
  */
-void parse_Struct(xmlNode *node)
+void parse_Struct(XmlNode node)
 {
-    char[] type = to!(char[])(node.name);
-    char[] name = getNName(node);
-    char[] mangled = toStringFree(getMangled(node));
-    char[] demangled = toStringFree(getDemangled(node));
-    char[] prevCurClass = curClass;
+    char[] type = to!(char[])(node.getAttribute("name"));
+    auto name = getNName(node);
+    auto mangled = getMangled(node);
+    auto demangled = getDemangled(node);
+    auto prevCurClass = curClass;
 
     parseMembers(node, true, true);
 
@@ -907,12 +893,12 @@ void parse_Struct(xmlNode *node)
 /**
  * Parse a Variable or Field node
  */
-void parse_Variable(xmlNode *node, bool inclass)
+void parse_Variable(XmlNode node, bool inclass)
 {
-    char[] stype = toStringFree(xmlGetProp(node, stringToPtr("type")));
+    auto stype = node.getAttribute("type");
     ParsedType type;
-    char[] name = getNName(node);
-    char[] mangled = toStringFree(getMangled(node));
+    auto name = getNName(node);
+    auto mangled = getMangled(node);
 
     if (outputC) {
         type = parseType(stype);
@@ -952,7 +938,7 @@ void parse_Variable(xmlNode *node, bool inclass)
             cout ~= "This->" ~ name ~ ";\n";
             cout ~= "}\n";
         } else {
-            char[] demangled = toStringFree(getDemangled(node));
+            auto demangled = getDemangled(node);
 
             // if it's a const, don't make the set
             if (stype[stype.length - 1] != 'c') {
@@ -989,138 +975,135 @@ void parse_Variable(xmlNode *node, bool inclass)
 /**
  * Parse Argument nodes
  */
-void parse_Arguments(xmlNode *node, char[] Dargs, char[] Deargs,
+void parse_Arguments(XmlNode node, char[] Dargs, char[] Deargs,
                      char[] Cargs, char[] Dcall,
                      char[] Ccall, bool reflection = false,
                      int *argc = null)
 {
     int onParam = 0;
-    xmlNode *curNode = null;
 
-    for (curNode = node.children; curNode; curNode = curNode.next) {
-        if (curNode.type == xmlElementType.XML_ELEMENT_NODE) {
-            auto nname = to!string(curNode.name);
-            auto def = to!string(xmlGetProp(curNode, stringToPtr("default")));
+    foreach (XmlNode curNode; node.getChildren()) {
+        auto nname = curNode.getName();
+        auto def = curNode.getAttribute("default");
 
-            if(def == "NULL")
+        if(def == "NULL")
+            def = "null";
+
+        if (nname == "Argument") {
+            ParsedType atype = parseType(curNode.getAttribute("type"));
+            auto aname = getNName(curNode);
+            if (aname == "") aname = to!(char[])("_" ~ to!string(onParam));
+            aname = safeName(aname);
+
+            if(def == "0" &&
+               (indexOf(atype.DType, "*") != -1 ||
+                atype.isFunctionPtr))
                 def = "null";
 
-            if (nname == "Argument") {
-                ParsedType atype = parseType(toStringFree(xmlGetProp(curNode, stringToPtr("type"))));
-                auto aname = getNName(curNode);
-                if (aname == "") aname = to!(char[])("_" ~ to!string(onParam));
-                aname = safeName(aname);
+            if (Dargs != "") {
+                Dargs ~= ", ";
+            }
 
-                if(def == "0" &&
-                   (indexOf(atype.DType, "*") != -1 ||
-                    atype.isFunctionPtr))
-                    def = "null";
+            if (!reflection || (!atype.isClass && !atype.isClassPtr)) {
+                if(def != "" && defaultValues)
+                    Dargs ~= atype.DType ~ " " ~ aname ~ " = " ~ def;
+                else
+                    Dargs ~= atype.DType ~ " " ~ aname;
+            } else {
+                Dargs ~= "void *" ~ aname;
+            }
 
-                if (Dargs != "") {
-                    Dargs ~= ", ";
-                }
-
-                if (!reflection || (!atype.isClass && !atype.isClassPtr)) {
-                    if(def != "" && defaultValues)
-                        Dargs ~= atype.DType ~ " " ~ aname ~ " = " ~ def;
-                    else
-                        Dargs ~= atype.DType ~ " " ~ aname;
-                } else {
-                    Dargs ~= "void *" ~ aname;
-                }
-
-                if (!reflection && (atype.isClass || atype.isClassPtr)) {
-                    // this becomes a void * in D's view
-                    if (Deargs != "") {
-                        Deargs ~= ", ";
-                    }
-                    Deargs ~= "void *";
-                } else {
-                    if (Deargs != "") {
-                        Deargs ~= ", ";
-                    }
-                    Deargs ~= atype.DType;
-                }
-
-                if (Cargs != "") {
-                    Cargs ~= ", ";
-                }
-                Cargs ~= atype.CType ~ " " ~ aname;
-
-                if (Dcall != "") {
-                    Dcall ~= ", ";
-                }
-                if (!reflection) {
-                    Dcall ~= aname;
-                    if (atype.isClass || atype.isClassPtr) {
-                        // turn this into the real info
-                        Dcall ~= ".__C_data";
-                    }
-                } else {
-                    if (atype.isClass) {
-                        Dcall ~= "new " ~ atype.className ~ "(cast(ifloat) 0, " ~ aname ~ ")";
-                    } else if (atype.isClassPtr) {
-                        Dcall ~= "cast(" ~ atype.DType ~ ") new " ~ replace(atype.DType, " *", "") ~ "(cast(ifloat) 0, " ~ aname ~ ")";
-                    } else {
-                        Dcall ~= aname;
-                    }
-                }
-
-                if (atype.isClass) {
-                    // need to dereference
-                    if (Ccall != "") {
-                        Ccall ~= ", ";
-                    }
-                    if (!reflection) {
-                        Ccall ~= "*" ~ aname;
-                    } else {
-                        Ccall ~= "&" ~ aname;
-                    }
-                } else {
-                    if (Ccall != "") {
-                        Ccall ~= ", ";
-                    }
-                    Ccall ~= aname;
-                }
-
-                if (argc) (*argc)++;
-
-            } else if (outputC && nname == "Ellipsis") {
-                if (Dargs != "") {
-                    Dargs ~= ", ";
-                }
-                Dargs ~= "...";
-
+            if (!reflection && (atype.isClass || atype.isClassPtr)) {
+                // this becomes a void * in D's view
                 if (Deargs != "") {
                     Deargs ~= ", ";
                 }
-                Deargs ~= "...";
-
-                if (Cargs != "") {
-                    Cargs ~= ", ";
+                Deargs ~= "void *";
+            } else {
+                if (Deargs != "") {
+                    Deargs ~= ", ";
                 }
-                Cargs ~= "...";
+                Deargs ~= atype.DType;
+            }
 
-                if (Dcall != "") {
-                    Dcall ~= ", ";
+            if (Cargs != "") {
+                Cargs ~= ", ";
+            }
+            Cargs ~= atype.CType ~ " " ~ aname;
+
+            if (Dcall != "") {
+                Dcall ~= ", ";
+            }
+            if (!reflection) {
+                Dcall ~= aname;
+                if (atype.isClass || atype.isClassPtr) {
+                    // turn this into the real info
+                    Dcall ~= ".__C_data";
                 }
-                Dcall ~= "...";
+            } else {
+                if (atype.isClass) {
+                    Dcall ~= "new " ~ atype.className ~ "(cast(ifloat) 0, " ~ aname ~ ")";
+                } else if (atype.isClassPtr) {
+                    Dcall ~= "cast(" ~ atype.DType ~ ") new " ~ replace(atype.DType, " *", "") ~ "(cast(ifloat) 0, " ~ aname ~ ")";
+                } else {
+                    Dcall ~= aname;
+                }
+            }
 
+            if (atype.isClass) {
+                // need to dereference
                 if (Ccall != "") {
                     Ccall ~= ", ";
                 }
-                Ccall ~= "...";
-
+                if (!reflection) {
+                    Ccall ~= "*" ~ aname;
+                } else {
+                    Ccall ~= "&" ~ aname;
+                }
             } else {
-                writefln("I don't know how to parse %s!", nname);
+                if (Ccall != "") {
+                    Ccall ~= ", ";
+                }
+                Ccall ~= aname;
             }
 
-            onParam++;
+            if (argc) (*argc)++;
+
+        } else if (outputC && nname == "Ellipsis") {
+            if (Dargs != "") {
+                Dargs ~= ", ";
+            }
+            Dargs ~= "...";
+
+            if (Deargs != "") {
+                Deargs ~= ", ";
+            }
+            Deargs ~= "...";
+
+            if (Cargs != "") {
+                Cargs ~= ", ";
+            }
+            Cargs ~= "...";
+
+            if (Dcall != "") {
+                Dcall ~= ", ";
+            }
+            Dcall ~= "...";
+
+            if (Ccall != "") {
+                Ccall ~= ", ";
+            }
+            Ccall ~= "...";
+
+        } else {
+            writefln("I don't know how to parse %s!", nname);
         }
+
+        onParam++;
     }
 }
 
-void parse_Function_body(xmlNode *node, char[] name, char[] mangled, char[] demangled, ParsedType type,
+void parse_Function_body(XmlNode node, string name, string mangled, string demangled, ParsedType type,
                          char[] Dargs, char[] Deargs, char[] Cargs, char[] Dcall, char[] Ccall,
                          bool isStatic = false)
 {
@@ -1167,8 +1150,8 @@ void parse_Function_body(xmlNode *node, char[] name, char[] mangled, char[] dema
     }
 }
 
-void parse_Function_reflection(xmlNode *node, char[] name, char[] cname,
-                               char[] mangled, ParsedType type,
+void parse_Function_reflection(XmlNode node, string name, string cname,
+                               string mangled, ParsedType type,
                                char[] Dargs, char[] Deargs, char[] Cargs, char[] Dcall, char[] Ccall)
 {
     // tie to the particular class being reflected
@@ -1180,9 +1163,8 @@ void parse_Function_reflection(xmlNode *node, char[] name, char[] cname,
     reflectedFunctions[to!string(fid)] = true;
 
     // make sure it's virtual
-    char* isvirtual = xmlGetProp(node, stringToPtr("virtual"));
-    if (isvirtual) free(isvirtual);
-    else return;
+    auto isvirtual = node.getAttribute("virtual");
+    if (isvirtual is null) return;
 
     // the C++ interface to the reflection
     cout ~= "int _BCD_R_" ~ mangled ~ "_CHECK(void *);\n";
@@ -1226,23 +1208,23 @@ void parse_Function_reflection(xmlNode *node, char[] name, char[] cname,
 /**
  * Parse a Method node
  */
-void parse_Method(xmlNode *node, bool reflection)
+void parse_Method(XmlNode node, bool reflection)
 {
     /* If it's static, it's for all intents and purposes a function */
-    if (toStringFree(xmlGetProp(node, stringToPtr("static"))) == "1") {
+    if (node.getAttribute("static") == "1") {
         if (!reflection)
             parse_Function(node, true);
         return;
     }
 
-    char[] name = getNName(node);
-    char[] mangled = toStringFree(getMangled(node));
-    ParsedType type = parseTypeReturnable(toStringFree(xmlGetProp(node, stringToPtr("returns"))));
+    auto name = getNName(node);
+    auto mangled = getMangled(node);
+    ParsedType type = parseTypeReturnable(node.getAttribute("returns"));
     char[] Dargs;
     char[] Deargs;
     if (!reflection) Deargs = to!(char[])("void *This");
     char[] Cargs;
-    if (!reflection) Cargs = curClass ~ " *This";
+    if (!reflection) Cargs = to!(char[])(curClass ~ " *This");
     char[] Dcall;
     if (!reflection) Dcall = to!(char[])("__C_data");
     char[] Ccall;
@@ -1259,16 +1241,16 @@ void parse_Method(xmlNode *node, bool reflection)
 /**
  * Parse an OperatorMethod node
  */
-void parse_OperatorMethod(xmlNode *node, bool reflection)
+void parse_OperatorMethod(XmlNode node, bool reflection)
 {
-    char[] name = toStringFree(xmlGetProp(node, stringToPtr("name")));
-    char[] mangled = toStringFree(getMangled(node));
-    ParsedType type = parseTypeReturnable(toStringFree(xmlGetProp(node, stringToPtr("returns"))));
+    auto name = node.getAttribute("name");
+    auto mangled = getMangled(node);
+    ParsedType type = parseTypeReturnable(node.getAttribute("returns"));
     char[] Dargs;
     char[] Deargs;
     if (!reflection) Deargs = to!(char[])("void *This");
     char[] Cargs;
-    if (!reflection) Cargs = curClass ~ " *This";
+    if (!reflection) Cargs = to!(char[])(curClass ~ " *This");
     char[] Dcall;
     if (!reflection) Dcall = to!(char[])("__C_data");
     char[] Ccall;
@@ -1430,12 +1412,13 @@ void parse_OperatorMethod(xmlNode *node, bool reflection)
 /**
  * Parse a Function node
  */
-void parse_Function(xmlNode *node, bool isStatic = false)
+void parse_Function(XmlNode node, bool isStatic = false)
 {
-    char[] name = getNName(node);
-    char[] mangled = toStringFree(getMangled(node));
-    char[] demangled = toStringFree(getDemangled(node));
-    ParsedType type = parseTypeReturnable(toStringFree(xmlGetProp(node, stringToPtr("returns"))));
+    auto name = getNName(node);
+    writefln("func %s", name);
+    auto mangled = getMangled(node);
+    auto demangled = getDemangled(node);
+    ParsedType type = parseTypeReturnable(node.getAttribute("returns"));
     char[] Dargs;
     char[] Deargs;
     char[] Cargs;
@@ -1456,13 +1439,13 @@ void parse_Function(xmlNode *node, bool isStatic = false)
 /**
  * Parse a Constructor node
  */
-void parse_Constructor(xmlNode *node, bool reflection)
+void parse_Constructor(XmlNode node, bool reflection)
 {
     if (outputC) return; // no constructors in C
     if (curClassAbstract) return; // no constructors for virtual classes
 
-    char[] name = getNName(node);
-    char[] mangled = toStringFree(getMangled(node));
+    auto name = getNName(node);
+    auto mangled = getMangled(node);
     if (reflection) mangled ~= "_R";
 
     while (indexOf(mangled, "*INTERNAL*") != -1) {
@@ -1470,9 +1453,8 @@ void parse_Constructor(xmlNode *node, bool reflection)
     }
 
     // no artificial constructors
-    char* artificial = xmlGetProp(node, stringToPtr("artificial"));
+    auto artificial = node.getAttribute("artificial");
     if (artificial) {
-        free(artificial);
         return;
     }
 
@@ -1534,20 +1516,20 @@ void parse_Constructor(xmlNode *node, bool reflection)
 /**
  * Parse a Typedef node
  */
-void parse_Typedef(xmlNode *node)
+void parse_Typedef(XmlNode node)
 {
     static bool[char[]] handledTypedefs;
-    char[] type = toStringFree(xmlGetProp(node, stringToPtr("id")));
-    char[] deftype = toStringFree(xmlGetProp(node, stringToPtr("type")));
+    auto type = node.getAttribute("id");
+    auto deftype = node.getAttribute("type");
 
     if(type == null || deftype == null) {
         return;
     }
 
     ParsedType pt = parseType(deftype);
-    char[] aname = getNName(node);
+    auto aname = getNName(node);
     if (!(type in handledTypedefs)) {
-        handledTypedefs[to!string(type)] = true;
+        handledTypedefs[type] = true;
 
         cout ~= "typedef " ~ pt.CType ~ " _BCD_" ~ type ~ "_" ~ aname ~ ";\n";
 
@@ -1558,81 +1540,69 @@ void parse_Typedef(xmlNode *node)
 /**
  * Parse an Enumeration node
  */
-void parse_Enumeration(xmlNode *node)
+void parse_Enumeration(XmlNode node)
 {
     static bool[char[]] handledEnums;
 
     if (!parseThis(node, true)) return;
 
-    char[] aname = getNName(node);
+    auto aname = getNName(node);
     if (aname == "") return;
 
-    char* realName = xmlGetProp(node, stringToPtr("name"));
+    auto realName = node.getAttribute("name");
     if (realName && realName[0] == '.') {
         // this is artificial, no real name
-        free(realName);
         realName = null;
     }
-    if (realName) free(realName);
 
-    char[] type = toStringFree(xmlGetProp(node, stringToPtr("id")));
+    auto type = node.getAttribute("id");
 
     // make an enum in D as well
     if (!(type in handledEnums)) {
         handledEnums[to!string(type)] = true;
 
-        xmlNode *curNode = null;
-
-        if (aname[0] != '.')
-        {
-
+        if (aname[0] != '.') {
             dhead ~= "enum " ~ safeName(aname) ~ " {\n";
 
 
-            for (curNode = node.children; curNode; curNode = curNode.next) {
-                if (curNode.type == xmlElementType.XML_ELEMENT_NODE) {
-                    auto nname = to!string(curNode.name);
+            foreach (XmlNode curNode; node.getChildren()) {
+                auto nname = to!string(curNode.getName());
 
-                    if (nname == "EnumValue") {
-                        dhead ~= safeName(getNName(curNode)) ~ "=" ~
-                        toStringFree(xmlGetProp(curNode, stringToPtr("init"))) ~ ",\n";
-                    } else {
-                        writefln("I don't know how to parse %s!", nname);
-                    }
+                if (nname == "EnumValue") {
+                    dhead ~= safeName(getNName(curNode)) ~ "=" ~
+                    curNode.getAttribute("init") ~ ",\n";
+                } else {
+                    writefln("I don't know how to parse %s!", nname);
                 }
             }
 
             dhead ~= "}\n";
 
-            if(polluteNamespace)
-            {
-	        for (curNode = node.children; curNode; curNode = curNode.next) {
-	            if (curNode.type == xmlElementType.XML_ELEMENT_NODE) {
-	                auto nname = to!string(curNode.name);
-
-                	if (nname == "EnumValue") {
-                            dhead ~= "alias " ~ safeName(aname) ~ "." ~ safeName(getNName(curNode)) ~ " " ~
-                            safeName(getNName(curNode)) ~ ";\n";
-		    	} else {
-                	    writefln("I don't know how to parse %s!", nname);
-              		}
-		    }
-		}
-            }
-        }
-        // then generate consts for it
-        if (outputEnumConst && !realName) {
-            for (curNode = node.children; curNode; curNode = curNode.next) {
-                if (curNode.type == xmlElementType.XML_ELEMENT_NODE) {
-                    auto nname = to!string(curNode.name);
+            if(polluteNamespace) {
+                foreach (XmlNode curNode; node.getChildren()) {
+                    auto nname = curNode.getName();
 
                     if (nname == "EnumValue") {
-                        dhead ~= "const int " ~ safeName(getNName(curNode)) ~ " = " ~
-                        toStringFree(xmlGetProp(curNode, stringToPtr("init"))) ~ ";\n";
+                        dhead ~= "alias " ~ safeName(aname) ~ "." ~ safeName(getNName(curNode)) ~ " " ~
+                        safeName(getNName(curNode)) ~ ";\n";
                     } else {
                         writefln("I don't know how to parse %s!", nname);
                     }
                 }
+            }
+            }
+    }
+        
+    // then generate consts for it
+    if (outputEnumConst && !realName) {
+        foreach (XmlNode curNode; node.getChildren()) {
+            auto nname = curNode.getName();
+
+            if (nname == "EnumValue") {
+                dhead ~= "const int " ~ safeName(getNName(curNode)) ~ " = " ~
+                curNode.getAttribute("init") ~ ";\n";
+            } else {
+                writefln("I don't know how to parse %s!", nname);
             }
         }
     }
@@ -1685,7 +1655,7 @@ class ParsedType {
 /**
  * Get the type of a node in C[++] and D, in a way which can be a D return type
  */
-ParsedType parseTypeReturnable(char[] type)
+ParsedType parseTypeReturnable(string type)
 {
     ParsedType t = parseType(type);
     if (t.isStaticArray) {
@@ -1724,388 +1694,383 @@ ParsedType parseType(string type)
 
     // first find the element matching the type
     if (!(type in parsedCache)) {
-        xmlNode *curNode = null;
 
-        for (curNode = gccxml.children; curNode; curNode = curNode.next) {
-            if (curNode.type == xmlElementType.XML_ELEMENT_NODE) {
-                auto nname = curNode.name;
+        foreach (XmlNode curNode; gccxml.getChildren()) {
+            auto nname = curNode.getName();
 
-                char[] id = toStringFree(xmlGetProp(curNode, stringToPtr("id")));
-                if (id != type) continue;
+            auto id = curNode.getAttribute("id");
+            if (id != type) continue;
 
-                if (nname == "FundamentalType") {
-                    char[] ctype = getNName(curNode);
+            if (nname == "FundamentalType") {
+                auto ctype = getNName(curNode);
 
-                    switch (ctype) {
-                        case "void":
-                            parsedCache[type] = new ParsedType("void", "void");
-                            break;
+                switch (ctype) {
+                    case "void":
+                        parsedCache[type] = new ParsedType("void", "void");
+                        break;
 
-                        case "long long int":
-                            parsedCache[type] = new ParsedType("long long int", "long");
-                            break;
+                    case "long long int":
+                        parsedCache[type] = new ParsedType("long long int", "long");
+                        break;
 
-                        case "long long unsigned int":
-                            parsedCache[type] = new ParsedType("long long unsigned int", "ulong");
-                            break;
+                    case "long long unsigned int":
+                        parsedCache[type] = new ParsedType("long long unsigned int", "ulong");
+                        break;
 
 
-                        case "long int":
-                            parsedCache[type] = new ParsedType("long int", "int");
-                            break;
+                    case "long int":
+                        parsedCache[type] = new ParsedType("long int", "int");
+                        break;
 
-                        case "long unsigned int":
-                            parsedCache[type] = new ParsedType("long unsigned int", "uint");
-                            break;
-
-
-                        case "int":
-                            parsedCache[type] = new ParsedType("int", "int");
-                            break;
-
-                        case "unsigned int":
-                            parsedCache[type] = new ParsedType("unsigned int", "uint");
-                            break;
+                    case "long unsigned int":
+                        parsedCache[type] = new ParsedType("long unsigned int", "uint");
+                        break;
 
 
-                        case "short int":
-                            parsedCache[type] = new ParsedType("short int", "short");
-                            break;
+                    case "int":
+                        parsedCache[type] = new ParsedType("int", "int");
+                        break;
 
-                        case "short unsigned int":
-                            parsedCache[type] = new ParsedType("short unsigned int", "ushort");
-                            break;
-
-
-                        case "char":
-                            parsedCache[type] = new ParsedType("char", "char");
-                            break;
-
-                        case "signed char":
-                            parsedCache[type] = new ParsedType("signed char", "char");
-                            break;
-
-                        case "unsigned char":
-                            parsedCache[type] = new ParsedType("unsigned char", "char");
-                            break;
-
-                        case "wchar_t":
-                            parsedCache[type] = new ParsedType("wchar_t", "wchar");
-                            break;
-
-                        case "bool":
-                            parsedCache[type] = new ParsedType("bool", "bool");
-                            break;
+                    case "unsigned int":
+                        parsedCache[type] = new ParsedType("unsigned int", "uint");
+                        break;
 
 
-                        case "long double":
-                            parsedCache[type] = new ParsedType("long double", "real");
-                            break;
+                    case "short int":
+                        parsedCache[type] = new ParsedType("short int", "short");
+                        break;
+
+                    case "short unsigned int":
+                        parsedCache[type] = new ParsedType("short unsigned int", "ushort");
+                        break;
 
 
-                        case "double":
-                            parsedCache[type] = new ParsedType("double", "double");
-                            break;
+                    case "char":
+                        parsedCache[type] = new ParsedType("char", "char");
+                        break;
+
+                    case "signed char":
+                        parsedCache[type] = new ParsedType("signed char", "char");
+                        break;
+
+                    case "unsigned char":
+                        parsedCache[type] = new ParsedType("unsigned char", "char");
+                        break;
+
+                    case "wchar_t":
+                        parsedCache[type] = new ParsedType("wchar_t", "wchar");
+                        break;
+
+                    case "bool":
+                        parsedCache[type] = new ParsedType("bool", "bool");
+                        break;
 
 
-                        case "float":
-                            parsedCache[type] = new ParsedType("float", "float");
-                            break;
+                    case "long double":
+                        parsedCache[type] = new ParsedType("long double", "real");
+                        break;
 
-                        default:
-                            parsedCache[type] = new ParsedType("void", "void");
-                            writefln("I don't know how translate %s to D.", ctype);
+
+                    case "double":
+                        parsedCache[type] = new ParsedType("double", "double");
+                        break;
+
+
+                    case "float":
+                        parsedCache[type] = new ParsedType("float", "float");
+                        break;
+
+                    default:
+                        parsedCache[type] = new ParsedType("void", "void");
+                        writefln("I don't know how translate %s to D.", ctype);
+                }
+
+            } else if (nname == "PointerType") {
+                ParsedType baseType =
+                    parseType(curNode.getAttribute("type"));
+
+                // functions and classes are already pointers
+                if (!baseType.isClass && !baseType.isFunction) {
+                    baseType.CType ~= " *";
+                    baseType.DType ~= " *";
+                    parsedCache[type] = new ParsedType(baseType);
+                } else if (baseType.isClass) {
+                    ParsedType pt = new ParsedType(baseType);
+                    pt.DType ~= " *";
+                    pt.isClassPtr = true;
+
+                    // if this is a const, our const will be on the wrong side!
+                    if (pt.CType.length >= 7 &&
+                        pt.CType[pt.CType.length - 7 .. pt.CType.length] == "* const") {
+                        pt.CType[pt.CType.length - 7 .. pt.CType.length] = "const *";
                     }
 
-                } else if (nname == "PointerType") {
-                    ParsedType baseType =
-                        parseType(toStringFree(xmlGetProp(curNode, stringToPtr("type"))));
+                    parsedCache[type] = pt;
+                } else if (baseType.isFunction) {
+                    ParsedType pt = new ParsedType(baseType);
+                    pt.isFunctionPtr = true;
+                    parsedCache[type] = pt;
+                }
 
-                    // functions and classes are already pointers
-                    if (!baseType.isClass && !baseType.isFunction) {
+            } else if (nname == "ArrayType") {
+                ParsedType baseType =
+                    parseType(curNode.getAttribute("type"));
+                auto max = curNode.getAttribute("max");
+                
+                string size = "";
+                if (max.length > 0)
+                    size = to!string(std.conv.parse!int(max) + 1);
+
+                // make a typedef and an alias
+                static bool[char[]] handledArrays;
+
+                if (!(type in handledArrays)) {
+                    handledArrays[type] = true;
+
+                    cout ~= "typedef " ~ baseType.CType ~ " _BCD_array_" ~ type ~
+                    "[" ~ size ~ "];\n";
+                }
+
+                baseType.CType = to!(char[])("_BCD_array_" ~ type);
+                baseType.DType ~= to!(char[])(" [" ~ size ~ "]");
+
+                ParsedType pt = new ParsedType(baseType);
+                pt.isStaticArray = true;
+                parsedCache[type] = pt;
+
+            } else if (nname == "ReferenceType") {
+                ParsedType baseType =
+                    parseType(curNode.getAttribute("type"));
+
+                if (!baseType.isClass) {
+                    if (outputC) {
                         baseType.CType ~= " *";
-                        baseType.DType ~= " *";
-                        parsedCache[type] = new ParsedType(baseType);
-                    } else if (baseType.isClass) {
-                        ParsedType pt = new ParsedType(baseType);
-                        pt.DType ~= " *";
-                        pt.isClassPtr = true;
-
-                        // if this is a const, our const will be on the wrong side!
-                        if (pt.CType.length >= 7 &&
-                            pt.CType[pt.CType.length - 7 .. pt.CType.length] == "* const") {
-                            pt.CType[pt.CType.length - 7 .. pt.CType.length] = "const *";
-                        }
-
-                        parsedCache[type] = pt;
-                    } else if (baseType.isFunction) {
-                        ParsedType pt = new ParsedType(baseType);
-                        pt.isFunctionPtr = true;
-                        parsedCache[type] = pt;
+                    } else {
+                        baseType.CType ~= " &";
                     }
+                    baseType.DType ~= " *";
 
-                } else if (nname == "ArrayType") {
-                    ParsedType baseType =
-                        parseType(toStringFree(xmlGetProp(curNode, stringToPtr("type"))));
-                    int size = to!int(toStringFree(xmlGetProp(curNode, stringToPtr("max")))) + 1;
+                    parsedCache[type] = new ParsedType(baseType);
+                } else {
+                    // we need to treat this as a pointer in D, but a reference in C
 
-                    // make a typedef and an alias
-                    static bool[char[]] handledArrays;
+                    // 1) cut off the *
+                    auto l = lastIndexOf(baseType.CType, '*');
+                    if (l != -1) baseType.CType[l] = ' ';
 
-                    if (!(type in handledArrays)) {
-                        handledArrays[type] = true;
-
-                        cout ~= "typedef " ~ baseType.CType ~ " _BCD_array_" ~ type ~
-                        "[" ~ to!string(size) ~ "];\n";
+                    // 2) add the &
+                    if (outputC) {
+                        baseType.CType ~= " *";
+                    } else {
+                        baseType.CType ~= " &";
                     }
-
-                    baseType.CType = to!(char[])("_BCD_array_" ~ type);
-                    baseType.DType ~= to!(char[])(" [" ~ to!string(size) ~ "]");
 
                     ParsedType pt = new ParsedType(baseType);
-                    pt.isStaticArray = true;
+                    pt.isClassPtr = true;
                     parsedCache[type] = pt;
+                }
 
-                } else if (nname == "ReferenceType") {
-                    ParsedType baseType =
-                        parseType(toStringFree(xmlGetProp(curNode, stringToPtr("type"))));
+            } else if (nname == "Struct" || nname == "Class") {
+                string className = getDemangled(curNode);
+                string snname = getNName(curNode);
 
-                    if (!baseType.isClass) {
-                        if (outputC) {
-                            baseType.CType ~= " *";
-                        } else {
-                            baseType.CType ~= " &";
-                        }
-                        baseType.DType ~= " *";
-
-                        parsedCache[type] = new ParsedType(baseType);
-                    } else {
-                        // we need to treat this as a pointer in D, but a reference in C
-
-                        // 1) cut off the *
-                        auto l = lastIndexOf(baseType.CType, '*');
-                        if (l != -1) baseType.CType[l] = ' ';
-
-                        // 2) add the &
-                        if (outputC) {
-                            baseType.CType ~= " *";
-                        } else {
-                            baseType.CType ~= " &";
-                        }
-
-                        ParsedType pt = new ParsedType(baseType);
-                        pt.isClassPtr = true;
-                        parsedCache[type] = pt;
-                    }
-
-                } else if (nname == "Struct" || nname == "Class") {
-                    string className = to!string(toStringFree(getDemangled(curNode)));
-                    string snname = to!string(safeName(getNName(curNode)));
-
-                    if (outputC) {
-                        char* incomplete = xmlGetProp(curNode, stringToPtr("incomplete"));
-                        if (incomplete) free(incomplete);
-
-                        if (incomplete) {
-                            parsedCache[type] = new ParsedType("struct " ~ className,
-                                                               "void");
-                        } else {
-                            parsedCache[type] = new ParsedType("struct " ~ className,
-                                                               snname);
-                        }
-                    } else {
-                        ParsedType pt;
-
-                        // special case for DReflectedClass
-                        if (className == "DReflectedClass") {
-                            parsedCache[type] = new ParsedType("DReflectedClass",
-                                                               "CXXReflectedClass");
-                            break;
-                        }
-
-                        // can't have incomplete types in D, so call it a BoundClass in D
-                        char* incomplete = xmlGetProp(curNode, stringToPtr("incomplete"));
-                        if (incomplete) free(incomplete);
-
-                        if (incomplete) {
-                            pt = new ParsedType(className ~ " *",
-                                                "bcd.bind.BoundClass");
-                        } else {
-                            pt = new ParsedType(className ~ " *",
-                                                to!string(safeName(getNName(curNode))));
-                        }
-
-                        pt.className = to!(char[])(className);
-                        pt.isClass = true;
-                        parsedCache[type] = pt;
-                    }
-
-                } else if (nname == "Union") {
-                    string className = to!string(toStringFree(getDemangled(curNode)));
-                    string snname = to!string(safeName(getNName(curNode)));
-
-                    char* incomplete = xmlGetProp(curNode, stringToPtr("incomplete"));
-                    if (incomplete) free(incomplete);
+                if (outputC) {
+                    auto incomplete = curNode.getAttribute("incomplete");
 
                     if (incomplete) {
-                        parsedCache[type] = new ParsedType("union " ~ className,
+                        parsedCache[type] = new ParsedType("struct " ~ className,
                                                            "void");
                     } else {
-                        parsedCache[type] = new ParsedType("union " ~ className,
+                        parsedCache[type] = new ParsedType("struct " ~ className,
                                                            snname);
                     }
-
-                } else if (nname == "CvQualifiedType") {
-                    // this is just a const
-                    ParsedType pt = parseType(toStringFree(xmlGetProp(curNode, stringToPtr("type"))));
-
-                    /*if (pt.CType.length >= 2) {
-                        char[] pfix = pt.CType[pt.CType.length - 2 .. pt.CType.length];
-                        if (pfix == " *" ||
-                            pfix == " &") {
-                            pt.CType = pt.CType[0 .. pt.CType.length - 2] ~
-                            " const" ~ pfix;
-                            parsedCache[type] = pt;
-                            break;
-                        }
-                    }*/
-
-                    /*if (pt.CType.length < 6 ||
-                        pt.CType[0..6] != "const ")
-                        pt.CType = "const " ~ pt.CType;*/
-                    pt.CType ~= " const";
-
-                    parsedCache[type] = pt;
-
-                } else if (nname == "Typedef") {
-                    // this is also an alias, but we should replicate it in D
-                    ParsedType pt = parseType(toStringFree(xmlGetProp(curNode, stringToPtr("type"))));
-                    char[] aname = getNName(curNode);
-
-                    parse_Typedef(curNode);
-
-                    ParsedType rpt = new ParsedType("_BCD_" ~ type ~ "_" ~ aname, pt.DType);
-                    rpt.isClass = pt.isClass;
-                    rpt.isFunction = pt.isFunction;
-                    rpt.isStaticArray = pt.isStaticArray;
-                    parsedCache[type] = rpt;
-
-                } else if (nname == "FunctionType" || nname == "MethodType") {
-                    // make a typedef and an alias
-                    static bool[char[]] handledFunctions;
-
-                    char[] base = to!(char[])("");
-                    if (nname == "MethodType") {
-                        base = parseType(toStringFree(xmlGetProp(curNode, stringToPtr("basetype")))).CType;
-                        base = base[0 .. base.length - 2] ~ "::*";
-                    }
-
-                    if (!(type in handledFunctions)) {
-                        handledFunctions[type] = true;
-
-                        ParsedType pt = parseType(toStringFree(xmlGetProp(curNode, stringToPtr("returns"))));
-                        char[] couta, dheada;
-
-                        bool first = true;
-                        couta = "typedef " ~ pt.CType ~
-                        " (*" ~ base ~ "_BCD_func_" ~ type ~ ")(";
-                        dheada = "alias " ~ pt.DType ~ " function(";
-
-                        // now look for arguments
-                        xmlNode *curArg;
-                        for (curArg = curNode.children; curArg; curArg = curArg.next) {
-                            if (curArg.type == xmlElementType.XML_ELEMENT_NODE) {
-                                auto aname = to!string(curArg.name);
-
-                                if (aname == "Argument") {
-                                    ParsedType argType =
-                                        parseType(toStringFree(xmlGetProp(curArg, stringToPtr("type"))));
-
-                                    if (!first) {
-                                        couta ~= ", ";
-                                        dheada ~= ", ";
-                                    } else {
-                                        first = false;
-                                    }
-
-                                    couta ~= argType.CType;
-                                    dheada ~= argType.DType;
-                                } else if (aname == "Ellipsis" && outputC) {
-                                    if (!first) {
-                                        couta ~= ", ";
-                                        dheada ~= ", ";
-                                    } else {
-                                        first = false;
-                                    }
-
-                                    couta ~= "...";
-                                    dheada ~= "...";
-                                }
-                            }
-                        }
-
-                        cout ~= couta ~ ");\n";
-                        dhead ~= dheada ~ ") _BCD_func_" ~ type ~ ";\n";
-                    }
-
+                } else {
                     ParsedType pt;
-                    if (nname != "MethodType") {
-                        pt = new ParsedType("_BCD_func_" ~ type, "_BCD_func_" ~ type);
-                        pt.isFunction = true;
-                    } else {
-                        writefln("WARNING: method types/delegates are not yet supported");
-                        pt = new ParsedType("_BCD_func_" ~ type, "bcd.bind.CXXDelegate");
-                        pt.isFunction = true;
-                    }
 
-                    parsedCache[type] = pt;
-
-                } else if (nname == "Enumeration") {
-                    if (parseThis(curNode, true)) parse_Enumeration(curNode);
-
-                    // if this is fake, ignore it
-                    char[] aname = getNName(curNode);
-
-                    if (aname[0] == '.') {
-                        parsedCache[type] = new ParsedType("int", "int");
+                    // special case for DReflectedClass
+                    if (className == "DReflectedClass") {
+                        parsedCache[type] = new ParsedType("DReflectedClass",
+                                                           "CXXReflectedClass");
                         break;
                     }
 
-                    /* we need the demangled name in C, but there is no demangled
-                     * for enumerations, so we need the parent */
-                    if (!outputC) {
-                        char[] context = toStringFree(xmlGetProp(curNode, stringToPtr("context")));
-                        if (context != "") {
-                            ParsedType pt = parseType(context);
+                    // can't have incomplete types in D, so call it a BoundClass in D
+                    auto incomplete = curNode.getAttribute("incomplete");
 
-                            pt.CType = replace(pt.CType, " *", "");
+                    if (incomplete) {
+                        pt = new ParsedType(className ~ " *",
+                                            "bcd.bind.BoundClass");
+                    } else {
+                        pt = new ParsedType(className ~ " *",
+                                            to!string(safeName(getNName(curNode))));
+                    }
 
-                            if (pt.CType == "") {
-                                pt.CType = "enum " ~ aname;
+                    pt.className = to!(char[])(className);
+                    pt.isClass = true;
+                    parsedCache[type] = pt;
+                }
+
+            } else if (nname == "Union") {
+                string className = getDemangled(curNode);
+                string snname = getNName(curNode);
+
+                auto incomplete = curNode.getAttribute("incomplete");
+
+                if (incomplete) {
+                    parsedCache[type] = new ParsedType("union " ~ className,
+                                                       "void");
+                } else {
+                    parsedCache[type] = new ParsedType("union " ~ className,
+                                                       snname);
+                }
+
+            } else if (nname == "CvQualifiedType") {
+                // this is just a const
+                ParsedType pt = parseType(curNode.getAttribute("type"));
+
+                /*if (pt.CType.length >= 2) {
+                    char[] pfix = pt.CType[pt.CType.length - 2 .. pt.CType.length];
+                    if (pfix == " *" ||
+                        pfix == " &") {
+                        pt.CType = pt.CType[0 .. pt.CType.length - 2] ~
+                        " const" ~ pfix;
+                        parsedCache[type] = pt;
+                        break;
+                    }
+                }*/
+
+                /*if (pt.CType.length < 6 ||
+                    pt.CType[0..6] != "const ")
+                    pt.CType = "const " ~ pt.CType;*/
+                pt.CType ~= " const";
+
+                parsedCache[type] = pt;
+
+            } else if (nname == "Typedef") {
+                // this is also an alias, but we should replicate it in D
+                ParsedType pt = parseType(curNode.getAttribute("type"));
+                auto aname = getNName(curNode);
+
+                parse_Typedef(curNode);
+
+                ParsedType rpt = new ParsedType(to!(char[])("_BCD_") ~ type ~ "_" ~ aname, pt.DType);
+                rpt.isClass = pt.isClass;
+                rpt.isFunction = pt.isFunction;
+                rpt.isStaticArray = pt.isStaticArray;
+                parsedCache[type] = rpt;
+
+            } else if (nname == "FunctionType" || nname == "MethodType") {
+                // make a typedef and an alias
+                static bool[char[]] handledFunctions;
+
+                char[] base = to!(char[])("");
+                if (nname == "MethodType") {
+                    base = parseType(curNode.getAttribute("basetype")).CType;
+                    base = base[0 .. base.length - 2] ~ "::*";
+                }
+
+                if (!(type in handledFunctions)) {
+                    handledFunctions[type] = true;
+
+                    ParsedType pt = parseType(curNode.getAttribute("returns"));
+                    char[] couta, dheada;
+
+                    bool first = true;
+                    couta = "typedef " ~ pt.CType ~
+                    " (*" ~ base ~ "_BCD_func_" ~ type ~ ")(";
+                    dheada = "alias " ~ pt.DType ~ " function(";
+
+                    // now look for arguments
+                    foreach (XmlNode curArg; curNode.getChildren()) {
+                        auto aname = curArg.getName();
+
+                        if (aname == "Argument") {
+                            ParsedType argType =
+                                parseType(curArg.getAttribute("type"));
+
+                            if (!first) {
+                                couta ~= ", ";
+                                dheada ~= ", ";
                             } else {
-                                pt.CType = "enum " ~ pt.CType ~ "::" ~ aname;
+                                first = false;
                             }
-                            pt.DType = to!(char[])("int");
 
-                            parsedCache[type] = new ParsedType(pt);
-                            break;
+                            couta ~= argType.CType;
+                            dheada ~= argType.DType;
+                        } else if (aname == "Ellipsis" && outputC) {
+                            if (!first) {
+                                couta ~= ", ";
+                                dheada ~= ", ";
+                            } else {
+                                first = false;
+                            }
+
+                            couta ~= "...";
+                            dheada ~= "...";
                         }
                     }
 
-                    parsedCache[type] = new ParsedType("enum " ~ aname, to!(char[])("int"));
-
-                } else if (nname == "Namespace") {
-                    char[] aname = toStringFree(xmlGetProp(curNode, stringToPtr("name")));
-                    if (aname == "::") aname = to!(char[])("");
-                    parsedCache[type] = new ParsedType(aname, to!(char[])(""));
-
-                } else {
-                    parsedCache[type] = new ParsedType("void", "void");
-                    writefln("I don't know how to parse the type %s.", nname);
+                    cout ~= couta ~ ");\n";
+                    dhead ~= dheada ~ ") _BCD_func_" ~ type ~ ";\n";
                 }
 
-                break;
+                ParsedType pt;
+                if (nname != "MethodType") {
+                    pt = new ParsedType("_BCD_func_" ~ type, "_BCD_func_" ~ type);
+                    pt.isFunction = true;
+                } else {
+                    writefln("WARNING: method types/delegates are not yet supported");
+                    pt = new ParsedType("_BCD_func_" ~ type, "bcd.bind.CXXDelegate");
+                    pt.isFunction = true;
+                }
+
+                parsedCache[type] = pt;
+
+            } else if (nname == "Enumeration") {
+                if (parseThis(curNode, true)) parse_Enumeration(curNode);
+
+                // if this is fake, ignore it
+                auto aname = getNName(curNode);
+
+                if (aname[0] == '.') {
+                    parsedCache[type] = new ParsedType("int", "int");
+                    break;
+                }
+
+                /* we need the demangled name in C, but there is no demangled
+                 * for enumerations, so we need the parent */
+                if (!outputC) {
+                    auto context = curNode.getAttribute("context");
+                    if (context != "") {
+                        ParsedType pt = parseType(context);
+
+                        pt.CType = replace(pt.CType, " *", "");
+
+                        if (pt.CType == "") {
+                            pt.CType = to!(char[])("enum " ~ aname);
+                        } else {
+                            pt.CType = "enum " ~ pt.CType ~ "::" ~ aname;
+                        }
+                        pt.DType = to!(char[])("int");
+
+                        parsedCache[type] = new ParsedType(pt);
+                        break;
+                    }
+                }
+
+                parsedCache[type] = new ParsedType("enum " ~ aname, to!(char[])("int"));
+
+            } else if (nname == "Namespace") {
+                auto aname = curNode.getAttribute("name");
+                if (aname == "::") aname = to!(char[])("");
+                parsedCache[type] = new ParsedType(aname, to!(char[])(""));
+
+            } else {
+                parsedCache[type] = new ParsedType("void", "void");
+                writefln("I don't know how to parse the type %s.", nname);
             }
+
+            break;
         }
 
         if (!(type in parsedCache)) {
