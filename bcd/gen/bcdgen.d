@@ -623,8 +623,6 @@ void parse_GCC_XML_for(string parseFor, bool inclass, bool types, bool reflectio
         // types that cannot be nameless:
         if (!parseThis(curNode)) continue;
 
-        writefln("::  %s", nname);
-
         if (nname == "Variable" || nname == "Field") {
             if (!types && !reflection) parse_Variable(curNode, inclass);
         } else if (nname == "Method") {
