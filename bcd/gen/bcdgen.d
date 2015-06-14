@@ -305,7 +305,7 @@ int main(char[][] args)
     xmlCheckVersion(20621); // the version bcdgen's XML was ported from
 
     // and read it in
-    doc = readDocument("out.xml");
+    doc = readDocument(readText("out.xml"));
 
     if (doc is null) {
         writefln("Failed to parse the GCCXML-produced XML file!");
@@ -313,7 +313,7 @@ int main(char[][] args)
     }
 
     // Get the root element node
-    gccxml = doc;
+    gccxml = doc.parseXPath("//GCC_XML")[0];
 
     parse_GCC_XML();
 
@@ -549,7 +549,10 @@ void parse_GCC_XML()
 
     // first parse for files and fundamental types
     foreach (XmlNode curNode; gccxml.getChildren()) {
-        auto nname = curNode.getAttribute("name");
+        if (curNode.isCData() || curNode.isXmlComment() || curNode.isXmlPI())
+            continue;
+
+        auto nname = curNode.getName();
         //writefln("  %s", nname);
 
         if (nname == "File") {
@@ -559,9 +562,10 @@ void parse_GCC_XML()
 
     // then parse for namespaces, typedefs, enums (all of which can be top-level)
     foreach (XmlNode curNode; gccxml.getChildren()) {
-        auto nname = curNode.getAttribute("name");
+        if (curNode.isCData() || curNode.isXmlComment() || curNode.isXmlPI())
+            continue;
 
-        writefln("  %s", nname);
+        auto nname = curNode.getName();
 
         if (nname == "Namespace") {
             parse_Namespace(curNode);
@@ -575,7 +579,7 @@ void parse_GCC_XML()
             if (indexOf (sname, "<DReflectedClass>") != -1) {
                 parse_Class(curNode);
             }
-            }
+        }
     }
 }
 
@@ -587,7 +591,10 @@ void parse_GCC_XML_for(string parseFor, bool inclass, bool types, bool reflectio
     int xmlrret;
 
     foreach (XmlNode curNode; gccxml.getChildren()) {
-        auto nname = curNode.getAttribute("name");
+        if (curNode.isCData() || curNode.isXmlComment())
+            continue;
+
+        auto nname = curNode.getName();
 
         auto id = curNode.getAttribute("id");
         if (parseFor != id) continue;
@@ -616,7 +623,7 @@ void parse_GCC_XML_for(string parseFor, bool inclass, bool types, bool reflectio
         // types that cannot be nameless:
         if (!parseThis(curNode)) continue;
 
-        //writefln("  %s", nname);
+        writefln("::  %s", nname);
 
         if (nname == "Variable" || nname == "Field") {
             if (!types && !reflection) parse_Variable(curNode, inclass);
@@ -713,7 +720,7 @@ void parse_Class(XmlNode node)
     auto base = "bcd.bind.BoundClass";
 
     foreach (XmlNode curNode; node.getChildren()) {
-        if (curNode.getAttribute("name") == "Base") {
+        if (curNode.getName() == "Base") {
             ParsedType pt = parseType(curNode.getAttribute("type"));
             base = to!string(pt.DType);
             break;
@@ -838,7 +845,7 @@ void parse_Class(XmlNode node)
 void parseBaseReflections(XmlNode node)
 {
     foreach (XmlNode curNode; node.getChildren()) {
-        if (curNode.getAttribute("name") == "Base") {
+        if (curNode.getName() == "Base") {
 
             // find the base class
             auto type = curNode.getAttribute("type");
@@ -978,7 +985,7 @@ void parse_Arguments(XmlNode node, char[] Dargs, char[] Deargs,
     int onParam = 0;
 
     foreach (XmlNode curNode; node.getChildren()) {
-        auto nname = curNode.getAttribute("name");
+        auto nname = curNode.getName();
         auto def = curNode.getAttribute("default");
 
         if(def == "NULL")
@@ -1410,6 +1417,7 @@ void parse_OperatorMethod(XmlNode node, bool reflection)
 void parse_Function(XmlNode node, bool isStatic = false)
 {
     auto name = getNName(node);
+    writefln("func %s", name);
     auto mangled = getMangled(node);
     auto demangled = getDemangled(node);
     ParsedType type = parseTypeReturnable(node.getAttribute("returns"));
@@ -1523,7 +1531,7 @@ void parse_Typedef(XmlNode node)
     ParsedType pt = parseType(deftype);
     auto aname = getNName(node);
     if (!(type in handledTypedefs)) {
-        handledTypedefs[to!string(type)] = true;
+        handledTypedefs[type] = true;
 
         cout ~= "typedef " ~ pt.CType ~ " _BCD_" ~ type ~ "_" ~ aname ~ ";\n";
 
@@ -1560,7 +1568,7 @@ void parse_Enumeration(XmlNode node)
 
 
             foreach (XmlNode curNode; node.getChildren()) {
-                auto nname = to!string(curNode.getAttribute("name"));
+                auto nname = to!string(curNode.getName());
 
                 if (nname == "EnumValue") {
                     dhead ~= safeName(getNName(curNode)) ~ "=" ~
@@ -1574,7 +1582,7 @@ void parse_Enumeration(XmlNode node)
 
             if(polluteNamespace) {
                 foreach (XmlNode curNode; node.getChildren()) {
-                    auto nname = curNode.getAttribute("name");
+                    auto nname = curNode.getName();
 
                     if (nname == "EnumValue") {
                         dhead ~= "alias " ~ safeName(aname) ~ "." ~ safeName(getNName(curNode)) ~ " " ~
@@ -1590,7 +1598,7 @@ void parse_Enumeration(XmlNode node)
     // then generate consts for it
     if (outputEnumConst && !realName) {
         foreach (XmlNode curNode; node.getChildren()) {
-            auto nname = curNode.getAttribute("name");
+            auto nname = curNode.getName();
 
             if (nname == "EnumValue") {
                 dhead ~= "const int " ~ safeName(getNName(curNode)) ~ " = " ~
@@ -1690,7 +1698,7 @@ ParsedType parseType(string type)
     if (!(type in parsedCache)) {
 
         foreach (XmlNode curNode; gccxml.getChildren()) {
-            auto nname = curNode.getAttribute("name");
+            auto nname = curNode.getName();
 
             auto id = curNode.getAttribute("id");
             if (id != type) continue;
@@ -1809,7 +1817,11 @@ ParsedType parseType(string type)
             } else if (nname == "ArrayType") {
                 ParsedType baseType =
                     parseType(curNode.getAttribute("type"));
-                int size = to!int(curNode.getAttribute("max")) + 1;
+                auto max = curNode.getAttribute("max");
+                
+                string size = "";
+                if (max.length > 0)
+                    size = to!string(std.conv.parse!int(max) + 1);
 
                 // make a typedef and an alias
                 static bool[char[]] handledArrays;
@@ -1818,11 +1830,11 @@ ParsedType parseType(string type)
                     handledArrays[type] = true;
 
                     cout ~= "typedef " ~ baseType.CType ~ " _BCD_array_" ~ type ~
-                    "[" ~ to!string(size) ~ "];\n";
+                    "[" ~ size ~ "];\n";
                 }
 
                 baseType.CType = to!(char[])("_BCD_array_" ~ type);
-                baseType.DType ~= to!(char[])(" [" ~ to!string(size) ~ "]");
+                baseType.DType ~= to!(char[])(" [" ~ size ~ "]");
 
                 ParsedType pt = new ParsedType(baseType);
                 pt.isStaticArray = true;
@@ -1972,7 +1984,7 @@ ParsedType parseType(string type)
 
                     // now look for arguments
                     foreach (XmlNode curArg; curNode.getChildren()) {
-                        auto aname = curArg.getAttribute("name");
+                        auto aname = curArg.getName();
 
                         if (aname == "Argument") {
                             ParsedType argType =
