@@ -302,8 +302,6 @@ int main(char[][] args)
     XmlNode doc = null;
     XmlNode *rootElement = null;
 
-    xmlCheckVersion(20621); // the version bcdgen's XML was ported from
-
     // and read it in
     doc = readDocument(readText("out.xml"));
 
@@ -316,8 +314,6 @@ int main(char[][] args)
     gccxml = doc.parseXPath("//GCC_XML")[0];
 
     parse_GCC_XML();
-
-    xmlCleanupParser();
 
     if (!outputC) cout ~= "}\n";
 
