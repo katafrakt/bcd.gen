@@ -44,8 +44,6 @@ import std.c.stdlib;
 alias std.c.stdlib.free free;
 alias std.process.system system;
 
-private import bcd.gen.libxml2;
-
 extern (C) char* getenv(immutable(char)*);
 
 // some global variables (yay)
@@ -55,7 +53,7 @@ char[] curFile;
 /** The include prefix */
 char[] incPrefix;
 /** The base directory of .h files */
-char[] baseDir;
+const(char)[] baseDir;
 /** The short name of the current .h file (no basename, no .h) */
 char[] shortName;
 /** The D namespace */
@@ -843,7 +841,7 @@ void parseBaseReflections(XmlNode node)
 
             // find the base class
             auto type = curNode.getAttribute("type");
-            
+
             foreach (XmlNode curBCNode; gccxml.getChildren()) {
                 if (type == curBCNode.getAttribute("id")) {
                     // parse this one too
@@ -1588,7 +1586,7 @@ void parse_Enumeration(XmlNode node)
             }
             }
     }
-        
+
     // then generate consts for it
     if (outputEnumConst && !realName) {
         foreach (XmlNode curNode; node.getChildren()) {
@@ -1812,7 +1810,7 @@ ParsedType parseType(string type)
                 ParsedType baseType =
                     parseType(curNode.getAttribute("type"));
                 auto max = curNode.getAttribute("max");
-                
+
                 string size = "";
                 if (max.length > 0)
                     size = to!string(std.conv.parse!int(max) + 1);
