@@ -1,5 +1,7 @@
 # bcd.gen
 
+**Current status:** does not work ;)
+
 This repository contains a modified version of [original bcd.gen](http://www.dsource.org/projects/bcd). It's supposed to generate C or C++ bindings from .h files. Generated C++ bindings replicate the API of the underlying C++ code, but have a C layer as a gobetween, and therefore require both a D compiler and a C++ compiler. Generated C bindings are simply extern (C)'s and structs, and therefore only require a D compiler.
 
 ## What's changed
